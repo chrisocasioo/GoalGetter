@@ -1,6 +1,8 @@
-import { useSignIn } from "@clerk/expo";
+import { useSSO, useSignIn } from "@clerk/expo";
 import { type Href, Link, useRouter } from "expo-router";
-import React from "react";
+import * as AuthSession from "expo-auth-session";
+import * as WebBrowser from "expo-web-browser";
+import React, { useCallback, useEffect } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -12,11 +14,27 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Feather } from "@expo/vector-icons";
 
 import { useColors } from "@/hooks/useColors";
 
+// Required: complete any pending auth sessions
+WebBrowser.maybeCompleteAuthSession();
+
+function useWarmUpBrowser() {
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    void WebBrowser.warmUpAsync();
+    return () => {
+      void WebBrowser.coolDownAsync();
+    };
+  }, []);
+}
+
 export default function SignInScreen() {
+  useWarmUpBrowser();
   const { signIn, errors, fetchStatus } = useSignIn();
+  const { startSSOFlow } = useSSO();
   const router = useRouter();
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -27,19 +45,38 @@ export default function SignInScreen() {
 
   const isLoading = fetchStatus === "fetching";
 
+  const handleOAuth = useCallback(
+    async (strategy: "oauth_google" | "oauth_apple") => {
+      try {
+        const { createdSessionId, setActive } = await startSSOFlow({
+          strategy,
+          redirectUrl: AuthSession.makeRedirectUri(),
+        });
+        if (createdSessionId && setActive) {
+          await setActive({
+            session: createdSessionId,
+            navigate: async ({ session, decorateUrl }) => {
+              if (session?.currentTask) return;
+              router.replace(decorateUrl("/") as Href);
+            },
+          });
+        }
+      } catch (err) {
+        console.error(JSON.stringify(err, null, 2));
+      }
+    },
+    [startSSOFlow, router],
+  );
+
   const handleSubmit = async () => {
     const { error } = await signIn.password({ emailAddress, password });
     if (error) return;
-
     if (signIn.status === "complete") {
       await signIn.finalize({
         navigate: ({ session, decorateUrl }) => {
           if (session?.currentTask) return;
           const url = decorateUrl("/");
-          if (url.startsWith("http")) {
-            return;
-          }
-          router.replace(url as Href);
+          if (!url.startsWith("http")) router.replace(url as Href);
         },
       });
     }
@@ -65,9 +102,7 @@ export default function SignInScreen() {
       <View style={s.container}>
         <View style={s.content}>
           <Text style={s.title}>Check your email</Text>
-          <Text style={s.subtitle}>
-            Enter the verification code we sent you
-          </Text>
+          <Text style={s.subtitle}>Enter the verification code we sent you</Text>
           <TextInput
             style={s.input}
             value={code}
@@ -95,10 +130,7 @@ export default function SignInScreen() {
               <Text style={s.buttonText}>Verify</Text>
             )}
           </Pressable>
-          <Pressable
-            style={s.linkButton}
-            onPress={() => signIn.mfa.sendEmailCode()}
-          >
+          <Pressable style={s.linkButton} onPress={() => signIn.mfa.sendEmailCode()}>
             <Text style={s.linkText}>Resend code</Text>
           </Pressable>
           <Pressable style={s.linkButton} onPress={() => signIn.reset()}>
@@ -122,6 +154,33 @@ export default function SignInScreen() {
         <Text style={s.title}>Welcome back</Text>
         <Text style={s.subtitle}>Sign in to your account</Text>
 
+        {/* OAuth buttons */}
+        <View style={s.oauthGroup}>
+          <Pressable
+            style={({ pressed }) => [s.oauthButton, pressed && s.buttonPressed]}
+            onPress={() => handleOAuth("oauth_google")}
+          >
+            <Feather name="globe" size={18} color={colors.foreground} />
+            <Text style={s.oauthText}>Continue with Google</Text>
+          </Pressable>
+          {Platform.OS === "ios" && (
+            <Pressable
+              style={({ pressed }) => [s.oauthButton, pressed && s.buttonPressed]}
+              onPress={() => handleOAuth("oauth_apple")}
+            >
+              <Feather name="smartphone" size={18} color={colors.foreground} />
+              <Text style={s.oauthText}>Continue with Apple</Text>
+            </Pressable>
+          )}
+        </View>
+
+        <View style={s.dividerRow}>
+          <View style={s.divider} />
+          <Text style={s.dividerText}>or</Text>
+          <View style={s.divider} />
+        </View>
+
+        {/* Email/password form */}
         <View style={s.form}>
           <TextInput
             style={s.input}
@@ -134,9 +193,7 @@ export default function SignInScreen() {
             autoComplete="email"
           />
           {errors?.fields?.identifier && (
-            <Text style={s.errorText}>
-              {errors.fields.identifier.message}
-            </Text>
+            <Text style={s.errorText}>{errors.fields.identifier.message}</Text>
           )}
           <TextInput
             style={s.input}
@@ -225,7 +282,43 @@ function makeStyles(
       fontSize: 15,
       color: colors.mutedForeground,
       fontFamily: "Inter_400Regular",
-      marginBottom: 32,
+      marginBottom: 24,
+    },
+    oauthGroup: {
+      gap: 10,
+      marginBottom: 20,
+    },
+    oauthButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: colors.radius,
+      paddingVertical: 13,
+      backgroundColor: colors.card,
+    },
+    oauthText: {
+      fontSize: 15,
+      color: colors.foreground,
+      fontFamily: "Inter_500Medium",
+    },
+    dividerRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginBottom: 20,
+      gap: 12,
+    },
+    divider: {
+      flex: 1,
+      height: 1,
+      backgroundColor: colors.border,
+    },
+    dividerText: {
+      fontSize: 13,
+      color: colors.mutedForeground,
+      fontFamily: "Inter_400Regular",
     },
     form: {
       gap: 12,
@@ -248,12 +341,8 @@ function makeStyles(
       alignItems: "center" as const,
       marginTop: 4,
     },
-    buttonDisabled: {
-      opacity: 0.5,
-    },
-    buttonPressed: {
-      opacity: 0.85,
-    },
+    buttonDisabled: { opacity: 0.5 },
+    buttonPressed: { opacity: 0.85 },
     buttonText: {
       color: colors.primaryForeground,
       fontSize: 16,

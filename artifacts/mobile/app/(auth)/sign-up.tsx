@@ -1,6 +1,8 @@
-import { useAuth, useSignUp } from "@clerk/expo";
+import { useAuth, useSSO, useSignUp } from "@clerk/expo";
 import { type Href, Link, useRouter } from "expo-router";
-import React from "react";
+import * as AuthSession from "expo-auth-session";
+import * as WebBrowser from "expo-web-browser";
+import React, { useCallback, useEffect } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -12,11 +14,26 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Feather } from "@expo/vector-icons";
 
 import { useColors } from "@/hooks/useColors";
 
+WebBrowser.maybeCompleteAuthSession();
+
+function useWarmUpBrowser() {
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    void WebBrowser.warmUpAsync();
+    return () => {
+      void WebBrowser.coolDownAsync();
+    };
+  }, []);
+}
+
 export default function SignUpScreen() {
+  useWarmUpBrowser();
   const { signUp, errors, fetchStatus } = useSignUp();
+  const { startSSOFlow } = useSSO();
   const { isSignedIn } = useAuth();
   const router = useRouter();
   const colors = useColors();
@@ -27,6 +44,29 @@ export default function SignUpScreen() {
   const [code, setCode] = React.useState("");
 
   const isLoading = fetchStatus === "fetching";
+
+  const handleOAuth = useCallback(
+    async (strategy: "oauth_google" | "oauth_apple") => {
+      try {
+        const { createdSessionId, setActive } = await startSSOFlow({
+          strategy,
+          redirectUrl: AuthSession.makeRedirectUri(),
+        });
+        if (createdSessionId && setActive) {
+          await setActive({
+            session: createdSessionId,
+            navigate: async ({ session, decorateUrl }) => {
+              if (session?.currentTask) return;
+              router.replace(decorateUrl("/") as Href);
+            },
+          });
+        }
+      } catch (err) {
+        console.error(JSON.stringify(err, null, 2));
+      }
+    },
+    [startSSOFlow, router],
+  );
 
   const handleSubmit = async () => {
     const { error } = await signUp.password({ emailAddress, password });
@@ -60,9 +100,7 @@ export default function SignUpScreen() {
       <View style={s.container}>
         <View style={s.content}>
           <Text style={s.title}>Verify your email</Text>
-          <Text style={s.subtitle}>
-            We sent a code to {emailAddress}
-          </Text>
+          <Text style={s.subtitle}>We sent a code to {emailAddress}</Text>
           <TextInput
             style={s.input}
             value={code}
@@ -114,6 +152,33 @@ export default function SignUpScreen() {
         <Text style={s.title}>Create account</Text>
         <Text style={s.subtitle}>Start turning goals into action plans</Text>
 
+        {/* OAuth buttons */}
+        <View style={s.oauthGroup}>
+          <Pressable
+            style={({ pressed }) => [s.oauthButton, pressed && s.buttonPressed]}
+            onPress={() => handleOAuth("oauth_google")}
+          >
+            <Feather name="globe" size={18} color={colors.foreground} />
+            <Text style={s.oauthText}>Continue with Google</Text>
+          </Pressable>
+          {Platform.OS === "ios" && (
+            <Pressable
+              style={({ pressed }) => [s.oauthButton, pressed && s.buttonPressed]}
+              onPress={() => handleOAuth("oauth_apple")}
+            >
+              <Feather name="smartphone" size={18} color={colors.foreground} />
+              <Text style={s.oauthText}>Continue with Apple</Text>
+            </Pressable>
+          )}
+        </View>
+
+        <View style={s.dividerRow}>
+          <View style={s.divider} />
+          <Text style={s.dividerText}>or</Text>
+          <View style={s.divider} />
+        </View>
+
+        {/* Email/password form */}
         <View style={s.form}>
           <TextInput
             style={s.input}
@@ -126,9 +191,7 @@ export default function SignUpScreen() {
             autoComplete="email"
           />
           {errors?.fields?.emailAddress && (
-            <Text style={s.errorText}>
-              {errors.fields.emailAddress.message}
-            </Text>
+            <Text style={s.errorText}>{errors.fields.emailAddress.message}</Text>
           )}
           <TextInput
             style={s.input}
@@ -219,7 +282,43 @@ function makeStyles(
       fontSize: 15,
       color: colors.mutedForeground,
       fontFamily: "Inter_400Regular",
-      marginBottom: 32,
+      marginBottom: 24,
+    },
+    oauthGroup: {
+      gap: 10,
+      marginBottom: 20,
+    },
+    oauthButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: colors.radius,
+      paddingVertical: 13,
+      backgroundColor: colors.card,
+    },
+    oauthText: {
+      fontSize: 15,
+      color: colors.foreground,
+      fontFamily: "Inter_500Medium",
+    },
+    dividerRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginBottom: 20,
+      gap: 12,
+    },
+    divider: {
+      flex: 1,
+      height: 1,
+      backgroundColor: colors.border,
+    },
+    dividerText: {
+      fontSize: 13,
+      color: colors.mutedForeground,
+      fontFamily: "Inter_400Regular",
     },
     form: {
       gap: 12,
@@ -242,12 +341,8 @@ function makeStyles(
       alignItems: "center" as const,
       marginTop: 4,
     },
-    buttonDisabled: {
-      opacity: 0.5,
-    },
-    buttonPressed: {
-      opacity: 0.85,
-    },
+    buttonDisabled: { opacity: 0.5 },
+    buttonPressed: { opacity: 0.85 },
     buttonText: {
       color: colors.primaryForeground,
       fontSize: 16,

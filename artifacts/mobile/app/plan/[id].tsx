@@ -1,9 +1,11 @@
+import { useAuth } from "@clerk/expo";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { useLocalSearchParams, useNavigation } from "expo-router";
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import React, { useLayoutEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Pressable,
   StyleSheet,
@@ -19,33 +21,22 @@ import {
   useExpandStep,
   useUpdateStep,
   useReorderSteps,
+  getGetPlanQueryKey,
 } from "@workspace/api-client-react";
 import type { Step, StepWithChildren } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { getGetPlanQueryKey } from "@workspace/api-client-react";
 
 type FlatStep = Step & {
-  depth: number;
   hasChildren: boolean;
-  children?: Step[];
+  children: Step[];
 };
 
 function flattenSteps(steps: StepWithChildren[]): FlatStep[] {
   const flat: FlatStep[] = [];
   for (const step of steps) {
-    flat.push({
-      ...step,
-      depth: step.depth,
-      hasChildren: step.children.length > 0,
-      children: step.children,
-    });
+    flat.push({ ...step, hasChildren: step.children.length > 0, children: step.children });
     for (const child of step.children) {
-      flat.push({
-        ...child,
-        depth: child.depth,
-        hasChildren: false,
-        children: [],
-      });
+      flat.push({ ...child, hasChildren: false, children: [] });
     }
   }
   return flat;
@@ -57,7 +48,9 @@ export default function PlanDetailScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
+  const router = useRouter();
   const queryClient = useQueryClient();
+  const { isSignedIn } = useAuth();
 
   const { data: plan, isLoading, error } = useGetPlan({ id: planId });
 
@@ -75,61 +68,87 @@ export default function PlanDetailScreen() {
     }
   }, [plan?.title, navigation]);
 
-  const handleExpand = async (stepId: number) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setExpandingIds((prev) => new Set(prev).add(stepId));
-    try {
-      await expandStep.mutateAsync({ id: stepId });
-      queryClient.invalidateQueries({ queryKey: getGetPlanQueryKey({ id: planId }) });
-    } finally {
-      setExpandingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(stepId);
-        return next;
-      });
+  // Auth gate: prompt sign-in if guest tries a protected action
+  const withAuth = (action: () => void) => {
+    if (!isSignedIn) {
+      Alert.alert(
+        "Sign In Required",
+        "Create a free account to edit and expand your plan steps.",
+        [
+          { text: "Not Now", style: "cancel" },
+          {
+            text: "Sign In",
+            onPress: () => router.push("/(auth)/sign-in"),
+          },
+        ],
+      );
+      return;
     }
+    action();
+  };
+
+  const handleExpand = (stepId: number) => {
+    withAuth(async () => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setExpandingIds((prev) => new Set(prev).add(stepId));
+      try {
+        await expandStep.mutateAsync({ id: stepId });
+        queryClient.invalidateQueries({ queryKey: getGetPlanQueryKey({ id: planId }) });
+      } catch {
+        Alert.alert("Error", "Could not expand this step. Please try again.");
+      } finally {
+        setExpandingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(stepId);
+          return next;
+        });
+      }
+    });
   };
 
   const handleStartEdit = (step: FlatStep) => {
-    setEditingId(step.id);
-    setEditText(step.text);
+    withAuth(() => {
+      setEditingId(step.id);
+      setEditText(step.text);
+    });
   };
 
   const handleSaveEdit = async () => {
     if (editingId === null) return;
     const text = editText.trim();
-    if (!text) {
-      setEditingId(null);
-      return;
-    }
+    setEditingId(null);
+    if (!text) return;
     try {
       await updateStep.mutateAsync({ id: editingId, data: { text } });
       queryClient.invalidateQueries({ queryKey: getGetPlanQueryKey({ id: planId }) });
-    } finally {
-      setEditingId(null);
+    } catch {
+      Alert.alert("Error", "Could not save your edit. Please try again.");
     }
   };
 
-  const handleMoveStep = async (stepId: number, direction: "up" | "down") => {
-    if (!plan) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const topSteps = plan.steps;
-    const idx = topSteps.findIndex((s) => s.id === stepId);
-    if (idx < 0) return;
-    const targetIdx = direction === "up" ? idx - 1 : idx + 1;
-    if (targetIdx < 0 || targetIdx >= topSteps.length) return;
+  const handleMoveStep = (stepId: number, direction: "up" | "down") => {
+    withAuth(async () => {
+      if (!plan) return;
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const topSteps = plan.steps;
+      const idx = topSteps.findIndex((s) => s.id === stepId);
+      if (idx < 0) return;
+      const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= topSteps.length) return;
 
-    const newOrder = topSteps.map((s, i) => {
-      if (i === idx) return { id: s.id, sortOrder: topSteps[targetIdx].sortOrder };
-      if (i === targetIdx) return { id: s.id, sortOrder: topSteps[idx].sortOrder };
-      return { id: s.id, sortOrder: s.sortOrder };
-    });
+      const newOrder = topSteps.map((s, i) => {
+        if (i === idx) return { id: s.id, sortOrder: topSteps[targetIdx].sortOrder };
+        if (i === targetIdx) return { id: s.id, sortOrder: topSteps[idx].sortOrder };
+        return { id: s.id, sortOrder: s.sortOrder };
+      });
 
-    await reorderSteps.mutateAsync({
-      id: planId,
-      data: { stepOrders: newOrder },
+      try {
+        await reorderSteps.mutateAsync({ id: planId, data: { stepOrders: newOrder } });
+        queryClient.invalidateQueries({ queryKey: getGetPlanQueryKey({ id: planId }) });
+      } catch {
+        Alert.alert("Error", "Could not reorder steps. Please try again.");
+      }
     });
-    queryClient.invalidateQueries({ queryKey: getGetPlanQueryKey({ id: planId }) });
   };
 
   const s = makeStyles(colors, insets);
@@ -153,7 +172,7 @@ export default function PlanDetailScreen() {
   const flatSteps = flattenSteps(plan.steps);
   const topLevelIds = plan.steps.map((s) => s.id);
 
-  const renderStep = ({ item, index }: { item: FlatStep; index: number }) => {
+  const renderStep = ({ item }: { item: FlatStep }) => {
     const isEditing = editingId === item.id;
     const isExpanding = expandingIds.has(item.id);
     const isTopLevel = item.depth === 0;
@@ -167,7 +186,7 @@ export default function PlanDetailScreen() {
             <View
               style={[
                 s.bullet,
-                item.hasChildren && { backgroundColor: colors.primary },
+                item.hasChildren && { backgroundColor: colors.primary, borderColor: colors.primary },
               ]}
             />
           </View>
@@ -184,9 +203,12 @@ export default function PlanDetailScreen() {
               />
             ) : (
               <Pressable onLongPress={() => handleStartEdit(item)}>
-                <Text style={[s.stepText, item.hasChildren && s.stepTextExpanded]}>
+                <Text style={[s.stepText, item.hasChildren && s.stepTextParent]}>
                   {item.text}
                 </Text>
+                {!isSignedIn && (
+                  <Text style={s.guestHint}>Long-press to edit · Sign in required</Text>
+                )}
               </Pressable>
             )}
           </View>
@@ -196,6 +218,7 @@ export default function PlanDetailScreen() {
                 style={({ pressed }) => [s.iconBtn, pressed && { opacity: 0.5 }]}
                 onPress={() => handleExpand(item.id)}
                 disabled={isExpanding}
+                testID={`expand-step-${item.id}`}
               >
                 {isExpanding ? (
                   <ActivityIndicator size="small" color={colors.primary} />
@@ -252,7 +275,7 @@ export default function PlanDetailScreen() {
     <View style={s.container}>
       <FlatList<FlatStep>
         data={flatSteps}
-        keyExtractor={(item) => String(item.id)}
+        keyExtractor={(item) => `${item.id}-${item.depth}`}
         renderItem={renderStep}
         contentContainerStyle={s.listContent}
         showsVerticalScrollIndicator={false}
@@ -260,6 +283,18 @@ export default function PlanDetailScreen() {
           <View style={s.header}>
             <Text style={s.goalLabel}>Goal</Text>
             <Text style={s.goalText}>{plan.goal}</Text>
+            {!isSignedIn && (
+              <Pressable
+                style={s.signInBanner}
+                onPress={() => router.push("/(auth)/sign-in")}
+              >
+                <Feather name="lock" size={13} color={colors.primary} />
+                <Text style={s.signInBannerText}>
+                  Sign in to edit, expand, and reorder steps
+                </Text>
+                <Feather name="chevron-right" size={13} color={colors.primary} />
+              </Pressable>
+            )}
           </View>
         }
         ListFooterComponent={<View style={{ height: insets.bottom + 24 }} />}
@@ -273,26 +308,22 @@ function makeStyles(
   insets: ReturnType<typeof useSafeAreaInsets>,
 ) {
   return StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
+    container: { flex: 1, backgroundColor: colors.background },
     center: {
       flex: 1,
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: colors.background,
     },
-    listContent: {
-      paddingHorizontal: 0,
-    },
+    listContent: { paddingHorizontal: 0 },
     header: {
       paddingHorizontal: 20,
       paddingTop: 16,
-      paddingBottom: 20,
+      paddingBottom: 16,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
       marginBottom: 8,
+      gap: 8,
     },
     goalLabel: {
       fontSize: 11,
@@ -301,7 +332,6 @@ function makeStyles(
       fontFamily: "Inter_600SemiBold",
       textTransform: "uppercase",
       letterSpacing: 0.8,
-      marginBottom: 4,
     },
     goalText: {
       fontSize: 16,
@@ -309,9 +339,24 @@ function makeStyles(
       fontFamily: "Inter_500Medium",
       lineHeight: 22,
     },
+    signInBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      backgroundColor: colors.secondary,
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      marginTop: 4,
+    },
+    signInBannerText: {
+      flex: 1,
+      fontSize: 12,
+      color: colors.primary,
+      fontFamily: "Inter_500Medium",
+    },
     stepRow: {
       paddingRight: 16,
-      paddingVertical: 0,
       position: "relative",
     },
     depthLine: {
@@ -331,7 +376,7 @@ function makeStyles(
     stepBullet: {
       width: 20,
       alignItems: "center",
-      paddingTop: 4,
+      paddingTop: 6,
     },
     bullet: {
       width: 7,
@@ -341,18 +386,22 @@ function makeStyles(
       borderWidth: 1,
       borderColor: colors.mutedForeground,
     },
-    stepBody: {
-      flex: 1,
-    },
+    stepBody: { flex: 1 },
     stepText: {
       fontSize: 15,
       color: colors.foreground,
       fontFamily: "Inter_400Regular",
       lineHeight: 22,
     },
-    stepTextExpanded: {
+    stepTextParent: {
       fontFamily: "Inter_600SemiBold",
       fontWeight: "600" as const,
+    },
+    guestHint: {
+      fontSize: 10,
+      color: colors.mutedForeground,
+      fontFamily: "Inter_400Regular",
+      marginTop: 2,
     },
     stepEditInput: {
       fontSize: 15,
@@ -378,9 +427,7 @@ function makeStyles(
       justifyContent: "center",
       borderRadius: 6,
     },
-    iconBtnDisabled: {
-      opacity: 0.3,
-    },
+    iconBtnDisabled: { opacity: 0.3 },
     errorText: {
       fontSize: 15,
       color: colors.destructive,
