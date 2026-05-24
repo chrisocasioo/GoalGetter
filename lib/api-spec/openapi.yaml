@@ -1,15 +1,24 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: GoalGetter API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: goals
+    description: Goal plan generation and management
+  - name: plans
+    description: Plan CRUD operations
+  - name: steps
+    description: Step operations
+  - name: usage
+    description: Usage tracking
+  - name: users
+    description: User management
 paths:
   /healthz:
     get:
@@ -24,6 +33,267 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /goals:
+    post:
+      operationId: generatePlan
+      tags: [goals]
+      summary: Generate a plan from a goal
+      description: Takes a goal string and returns an AI-generated, structured plan with steps
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GeneratePlanInput"
+      responses:
+        "200":
+          description: Generated plan with steps
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlanWithSteps"
+        "429":
+          description: Free plan limit reached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /plans:
+    get:
+      operationId: listPlans
+      tags: [plans]
+      summary: List plans for authenticated user
+      responses:
+        "200":
+          description: List of plans
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Plan"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /plans/{id}:
+    get:
+      operationId: getPlan
+      tags: [plans]
+      summary: Get a plan with all its steps
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Plan with steps
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlanWithSteps"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    delete:
+      operationId: deletePlan
+      tags: [plans]
+      summary: Delete a plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /steps/{id}:
+    patch:
+      operationId: updateStep
+      tags: [steps]
+      summary: Update a step's text
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateStepInput"
+      responses:
+        "200":
+          description: Updated step
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Step"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /steps/{id}/expand:
+    post:
+      operationId: expandStep
+      tags: [steps]
+      summary: Expand a step into sub-steps using AI
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The step with new sub-steps
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StepWithChildren"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /plans/{id}/reorder:
+    patch:
+      operationId: reorderSteps
+      tags: [plans]
+      summary: Reorder steps within a plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReorderStepsInput"
+      responses:
+        "200":
+          description: Updated plan with reordered steps
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlanWithSteps"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /usage:
+    get:
+      operationId: getUsage
+      tags: [usage]
+      summary: Get current usage count for guest or user
+      parameters:
+        - name: guestSessionId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Usage data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageStatus"
+
+  /users/sync:
+    post:
+      operationId: syncUser
+      tags: [users]
+      summary: Create or sync authenticated user record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SyncUserInput"
+      responses:
+        "200":
+          description: User record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /users/me:
+    get:
+      operationId: getMyProfile
+      tags: [users]
+      summary: Get current user profile
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    delete:
+      operationId: deleteMyAccount
+      tags: [users]
+      summary: Delete current user account and all data
+      responses:
+        "204":
+          description: Account deleted
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +304,244 @@ components:
       required:
         - status
 
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+      required:
+        - error
+
+    GeneratePlanInput:
+      type: object
+      properties:
+        goal:
+          type: string
+          minLength: 3
+          maxLength: 500
+        guestSessionId:
+          type: string
+      required:
+        - goal
+
+    Plan:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+          nullable: true
+        guestSessionId:
+          type: string
+          nullable: true
+        title:
+          type: string
+        goal:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - title
+        - goal
+        - createdAt
+        - updatedAt
+
+    Step:
+      type: object
+      properties:
+        id:
+          type: integer
+        planId:
+          type: integer
+        parentStepId:
+          type: integer
+          nullable: true
+        text:
+          type: string
+        sortOrder:
+          type: integer
+        depth:
+          type: integer
+        isExpanded:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - planId
+        - text
+        - sortOrder
+        - depth
+        - isExpanded
+        - createdAt
+        - updatedAt
+
+    StepWithChildren:
+      type: object
+      properties:
+        id:
+          type: integer
+        planId:
+          type: integer
+        parentStepId:
+          type: integer
+          nullable: true
+        text:
+          type: string
+        sortOrder:
+          type: integer
+        depth:
+          type: integer
+        isExpanded:
+          type: boolean
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/Step"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - planId
+        - text
+        - sortOrder
+        - depth
+        - isExpanded
+        - children
+        - createdAt
+        - updatedAt
+
+    PlanWithSteps:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+          nullable: true
+        guestSessionId:
+          type: string
+          nullable: true
+        title:
+          type: string
+        goal:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/StepWithChildren"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - title
+        - goal
+        - steps
+        - createdAt
+        - updatedAt
+
+    UpdateStepInput:
+      type: object
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 1000
+      required:
+        - text
+
+    ReorderStepsInput:
+      type: object
+      properties:
+        stepOrders:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+              sortOrder:
+                type: integer
+            required:
+              - id
+              - sortOrder
+      required:
+        - stepOrders
+
+    UsageStatus:
+      type: object
+      properties:
+        planCount:
+          type: integer
+        limit:
+          type: integer
+        isPro:
+          type: boolean
+        canGenerate:
+          type: boolean
+      required:
+        - planCount
+        - limit
+        - isPro
+        - canGenerate
+
+    SyncUserInput:
+      type: object
+      properties:
+        clerkUserId:
+          type: string
+        email:
+          type: string
+        referralCode:
+          type: string
+      required:
+        - clerkUserId
+        - email
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+        clerkUserId:
+          type: string
+        email:
+          type: string
+        referralCode:
+          type: string
+        subscriptionStatus:
+          type: string
+        subscriptionExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - clerkUserId
+        - email
+        - referralCode
+        - subscriptionStatus
+        - createdAt
