@@ -19,19 +19,18 @@ export async function resolveUserId(clerkUserId: string | null): Promise<number 
 }
 
 /**
- * Determine whether the requesting identity (authenticated user or guest)
- * is allowed to access or modify the given plan.
+ * Determine whether the requesting identity can READ the given plan.
+ * Authenticated users must own the plan (by userId).
+ * Guests may read their own just-generated plan (by guestSessionId).
  */
-export function canAccessPlan(
+export function canReadPlan(
   plan: Plan,
   userId: number | null,
   guestSessionId: string | undefined
 ): boolean {
   if (userId !== null) {
-    // Authenticated user: must own the plan
     return plan.userId === userId;
   }
-  // Guest: must match the server-assigned guest session
   if (guestSessionId && plan.guestSessionId !== null) {
     return plan.guestSessionId === guestSessionId;
   }
@@ -39,28 +38,35 @@ export function canAccessPlan(
 }
 
 /**
- * Look up a plan and verify the requester owns it.
- * Returns { plan } on success, or sends an HTTP error response and returns null.
+ * Determine whether the requesting identity can WRITE to the given plan.
+ * Guests are never allowed to mutate plans — account creation is required.
  */
-export async function requirePlanAccess(
+export function canWritePlan(plan: Plan, userId: number | null): boolean {
+  if (userId === null) return false;
+  return plan.userId === userId;
+}
+
+type ResLike = { status: (n: number) => { json: (b: object) => void } };
+
+/**
+ * Look up a plan and verify the requester can READ it.
+ * Guests may access their own freshly generated plans.
+ */
+export async function requirePlanReadAccess(
   req: Request,
-  res: { status: (n: number) => { json: (b: object) => void } },
+  res: ResLike,
   planId: number
 ): Promise<Plan | null> {
-  const plan = await db.query.plans.findFirst({
-    where: eq(plans.id, planId),
-  });
+  const plan = await db.query.plans.findFirst({ where: eq(plans.id, planId) });
 
   if (!plan) {
     res.status(404).json({ error: "Plan not found" });
     return null;
   }
 
-  const clerkUserId = req.clerkUserId ?? null;
-  const userId = await resolveUserId(clerkUserId);
-  const guestSessionId = req.guestSessionId;
+  const userId = await resolveUserId(req.clerkUserId ?? null);
 
-  if (!canAccessPlan(plan, userId, guestSessionId)) {
+  if (!canReadPlan(plan, userId, req.guestSessionId)) {
     res.status(403).json({ error: "Not authorized to access this plan" });
     return null;
   }
@@ -69,25 +75,79 @@ export async function requirePlanAccess(
 }
 
 /**
- * Look up a step and verify the requester owns the parent plan.
- * Returns { step, plan } on success, or sends an HTTP error response.
+ * Look up a plan and verify the requester can WRITE to it.
+ * Requires authentication — guests always receive 401.
  */
-export async function requireStepAccess(
+export async function requirePlanWriteAccess(
   req: Request,
-  res: { status: (n: number) => { json: (b: object) => void } },
+  res: ResLike,
+  planId: number
+): Promise<Plan | null> {
+  if (!req.clerkUserId) {
+    res.status(401).json({ error: "Authentication required" });
+    return null;
+  }
+
+  const plan = await db.query.plans.findFirst({ where: eq(plans.id, planId) });
+
+  if (!plan) {
+    res.status(404).json({ error: "Plan not found" });
+    return null;
+  }
+
+  const userId = await resolveUserId(req.clerkUserId);
+
+  if (!canWritePlan(plan, userId)) {
+    res.status(403).json({ error: "Not authorized to modify this plan" });
+    return null;
+  }
+
+  return plan;
+}
+
+/**
+ * Look up a step and verify the requester can READ the parent plan.
+ */
+export async function requireStepReadAccess(
+  req: Request,
+  res: ResLike,
   stepId: number
 ): Promise<{ step: Step; plan: Plan } | null> {
-  const step = await db.query.steps.findFirst({
-    where: eq(steps.id, stepId),
-  });
+  const step = await db.query.steps.findFirst({ where: eq(steps.id, stepId) });
 
   if (!step) {
     res.status(404).json({ error: "Step not found" });
     return null;
   }
 
-  const plan = await requirePlanAccess(req, res, step.planId);
+  const plan = await requirePlanReadAccess(req, res, step.planId);
   if (!plan) return null;
 
   return { step, plan };
 }
+
+/**
+ * Look up a step and verify the requester can WRITE to the parent plan.
+ * Requires authentication.
+ */
+export async function requireStepWriteAccess(
+  req: Request,
+  res: ResLike,
+  stepId: number
+): Promise<{ step: Step; plan: Plan } | null> {
+  const step = await db.query.steps.findFirst({ where: eq(steps.id, stepId) });
+
+  if (!step) {
+    res.status(404).json({ error: "Step not found" });
+    return null;
+  }
+
+  const plan = await requirePlanWriteAccess(req, res, step.planId);
+  if (!plan) return null;
+
+  return { step, plan };
+}
+
+// Legacy export — keep read semantics for backward compat
+export const requirePlanAccess = requirePlanReadAccess;
+export const requireStepAccess = requireStepReadAccess;

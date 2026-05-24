@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type NextFunction } from "express";
 import { db } from "@workspace/db";
-import { plans, steps, users } from "@workspace/db";
+import { plans, steps } from "@workspace/db";
 import {
   GetPlanParams,
   DeletePlanParams,
@@ -8,7 +8,12 @@ import {
   ReorderStepsBody,
 } from "@workspace/api-zod";
 import { eq, and, asc } from "drizzle-orm";
-import { requirePlanAccess, resolveUserId } from "../lib/planAccess";
+import {
+  requirePlanReadAccess,
+  requirePlanWriteAccess,
+  resolveUserId,
+} from "../lib/planAccess";
+import { requireAuth } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -25,14 +30,10 @@ function buildStepTree(
     }));
 }
 
-router.get("/plans", async (req: Request, res, next: NextFunction) => {
+// GET /plans — list authenticated user's plans (auth required)
+router.get("/plans", requireAuth, async (req: Request, res, next: NextFunction) => {
   try {
-    const clerkUserId = req.clerkUserId ?? null;
-    if (!clerkUserId) {
-      res.status(401).json({ error: "Authentication required" });
-      return;
-    }
-    const userId = await resolveUserId(clerkUserId);
+    const userId = await resolveUserId(req.clerkUserId!);
     if (!userId) {
       res.status(401).json({ error: "User not found. Call /users/sync first." });
       return;
@@ -49,6 +50,7 @@ router.get("/plans", async (req: Request, res, next: NextFunction) => {
   }
 });
 
+// GET /plans/:id — guests may read their own just-generated plan; auth users own plans only
 router.get("/plans/:id", async (req: Request, res, next: NextFunction) => {
   try {
     const paramsResult = GetPlanParams.safeParse({ id: Number(req.params.id) });
@@ -57,7 +59,7 @@ router.get("/plans/:id", async (req: Request, res, next: NextFunction) => {
       return;
     }
 
-    const plan = await requirePlanAccess(req, res, paramsResult.data.id);
+    const plan = await requirePlanReadAccess(req, res, paramsResult.data.id);
     if (!plan) return;
 
     const allSteps = await db.query.steps.findMany({
@@ -71,7 +73,8 @@ router.get("/plans/:id", async (req: Request, res, next: NextFunction) => {
   }
 });
 
-router.delete("/plans/:id", async (req: Request, res, next: NextFunction) => {
+// DELETE /plans/:id — auth required; guests cannot delete
+router.delete("/plans/:id", requireAuth, async (req: Request, res, next: NextFunction) => {
   try {
     const paramsResult = DeletePlanParams.safeParse({ id: Number(req.params.id) });
     if (!paramsResult.success) {
@@ -79,7 +82,7 @@ router.delete("/plans/:id", async (req: Request, res, next: NextFunction) => {
       return;
     }
 
-    const plan = await requirePlanAccess(req, res, paramsResult.data.id);
+    const plan = await requirePlanWriteAccess(req, res, paramsResult.data.id);
     if (!plan) return;
 
     await db.delete(plans).where(eq(plans.id, plan.id));
@@ -89,7 +92,8 @@ router.delete("/plans/:id", async (req: Request, res, next: NextFunction) => {
   }
 });
 
-router.patch("/plans/:id/reorder", async (req: Request, res, next: NextFunction) => {
+// PATCH /plans/:id/reorder — auth required; guests cannot reorder
+router.patch("/plans/:id/reorder", requireAuth, async (req: Request, res, next: NextFunction) => {
   try {
     const paramsResult = ReorderStepsParams.safeParse({ id: Number(req.params.id) });
     const bodyResult = ReorderStepsBody.safeParse(req.body);
@@ -99,7 +103,7 @@ router.patch("/plans/:id/reorder", async (req: Request, res, next: NextFunction)
       return;
     }
 
-    const plan = await requirePlanAccess(req, res, paramsResult.data.id);
+    const plan = await requirePlanWriteAccess(req, res, paramsResult.data.id);
     if (!plan) return;
 
     const { stepOrders } = bodyResult.data;

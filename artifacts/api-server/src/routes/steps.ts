@@ -4,7 +4,8 @@ import { steps } from "@workspace/db";
 import { UpdateStepParams, UpdateStepBody, ExpandStepParams } from "@workspace/api-zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { eq, asc } from "drizzle-orm";
-import { requireStepAccess } from "../lib/planAccess";
+import { requireStepWriteAccess } from "../lib/planAccess";
+import { requireAuth } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -12,7 +13,8 @@ interface StepData {
   text: string;
 }
 
-router.patch("/steps/:id", async (req: Request, res, next: NextFunction) => {
+// PATCH /steps/:id — edit step text; auth required (guests cannot edit)
+router.patch("/steps/:id", requireAuth, async (req: Request, res, next: NextFunction) => {
   try {
     const paramsResult = UpdateStepParams.safeParse({ id: Number(req.params.id) });
     const bodyResult = UpdateStepBody.safeParse(req.body);
@@ -22,7 +24,7 @@ router.patch("/steps/:id", async (req: Request, res, next: NextFunction) => {
       return;
     }
 
-    const result = await requireStepAccess(req, res, paramsResult.data.id);
+    const result = await requireStepWriteAccess(req, res, paramsResult.data.id);
     if (!result) return;
 
     const [updated] = await db
@@ -37,7 +39,8 @@ router.patch("/steps/:id", async (req: Request, res, next: NextFunction) => {
   }
 });
 
-router.post("/steps/:id/expand", async (req: Request, res, next: NextFunction) => {
+// POST /steps/:id/expand — drill down into sub-steps; auth required (guests cannot expand)
+router.post("/steps/:id/expand", requireAuth, async (req: Request, res, next: NextFunction) => {
   try {
     const paramsResult = ExpandStepParams.safeParse({ id: Number(req.params.id) });
 
@@ -46,7 +49,7 @@ router.post("/steps/:id/expand", async (req: Request, res, next: NextFunction) =
       return;
     }
 
-    const result = await requireStepAccess(req, res, paramsResult.data.id);
+    const result = await requireStepWriteAccess(req, res, paramsResult.data.id);
     if (!result) return;
 
     const { step, plan } = result;

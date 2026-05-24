@@ -1,9 +1,10 @@
-import { Router, type IRouter, type Request, type NextFunction } from "express";
+import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
 import { db } from "@workspace/db";
 import { users, referrals } from "@workspace/db";
 import { SyncUserBody } from "@workspace/api-zod";
 import { eq } from "drizzle-orm";
 import crypto from "node:crypto";
+import { requireAuth } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -11,20 +12,16 @@ function generateReferralCode(): string {
   return crypto.randomBytes(4).toString("hex").toUpperCase();
 }
 
-router.post("/users/sync", async (req: Request, res, next: NextFunction) => {
+// POST /users/sync — create or return user record on first sign-in
+router.post("/users/sync", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const clerkUserId = req.clerkUserId ?? null;
-    if (!clerkUserId) {
-      res.status(401).json({ error: "Authentication required" });
-      return;
-    }
-
     const bodyResult = SyncUserBody.safeParse(req.body);
     if (!bodyResult.success) {
       res.status(400).json({ error: "Invalid request body" });
       return;
     }
 
+    const clerkUserId = req.clerkUserId!;
     const { email, referralCode: incomingReferralCode } = bodyResult.data;
 
     const existing = await db.query.users.findFirst({
@@ -101,16 +98,11 @@ router.post("/users/sync", async (req: Request, res, next: NextFunction) => {
   }
 });
 
-router.get("/users/me", async (req: Request, res, next: NextFunction) => {
+// GET /users/me — get authenticated user profile
+router.get("/users/me", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const clerkUserId = req.clerkUserId ?? null;
-    if (!clerkUserId) {
-      res.status(401).json({ error: "Authentication required" });
-      return;
-    }
-
     const user = await db.query.users.findFirst({
-      where: eq(users.clerkUserId, clerkUserId),
+      where: eq(users.clerkUserId, req.clerkUserId!),
     });
 
     if (!user) {
@@ -132,16 +124,15 @@ router.get("/users/me", async (req: Request, res, next: NextFunction) => {
   }
 });
 
-router.delete("/users/me", async (req: Request, res, next: NextFunction) => {
+/**
+ * DELETE /account — Apple-required account deletion endpoint.
+ * Also aliased at DELETE /users/me for API consistency.
+ * Removes the user record and all associated data via DB cascade.
+ */
+async function handleDeleteAccount(req: Request, res: Response, next: NextFunction) {
   try {
-    const clerkUserId = req.clerkUserId ?? null;
-    if (!clerkUserId) {
-      res.status(401).json({ error: "Authentication required" });
-      return;
-    }
-
     const user = await db.query.users.findFirst({
-      where: eq(users.clerkUserId, clerkUserId),
+      where: eq(users.clerkUserId, req.clerkUserId!),
     });
 
     if (!user) {
@@ -149,11 +140,15 @@ router.delete("/users/me", async (req: Request, res, next: NextFunction) => {
       return;
     }
 
+    // Hard delete — cascade via FK constraints removes plans, steps, usage, referrals
     await db.delete(users).where(eq(users.id, user.id));
     res.status(204).send();
   } catch (err) {
     next(err);
   }
-});
+}
+
+router.delete("/account", requireAuth, handleDeleteAccount);
+router.delete("/users/me", requireAuth, handleDeleteAccount);
 
 export default router;
