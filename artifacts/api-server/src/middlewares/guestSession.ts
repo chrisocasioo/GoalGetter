@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import { getAuth } from "@clerk/express";
 import crypto from "node:crypto";
 
 const COOKIE_NAME = "gg_guest_id";
@@ -12,10 +13,13 @@ const COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year in seconds
  * For mobile clients that don't send cookies, the client-supplied
  * X-Guest-Session-Id header is accepted as a fallback, but cookie
  * takes precedence when present.
+ *
+ * Must run AFTER clerkMiddleware() so getAuth(req) is available.
  */
 export function guestSession(req: Request, res: Response, next: NextFunction) {
   // Authenticated users don't need a guest session ID
-  if (req.clerkUserId) {
+  const auth = getAuth(req);
+  if (auth?.userId) {
     next();
     return;
   }
