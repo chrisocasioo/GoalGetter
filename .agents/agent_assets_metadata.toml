@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "L2gnBravIxXHA0KUVRoFj"
+uri = "file://artifacts/mobile/assets/images/icon.png"
+type = "image"
+title = "goalgetter app icon"

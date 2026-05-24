@@ -5,6 +5,7 @@ import { SyncUserBody } from "@workspace/api-zod";
 import { eq } from "drizzle-orm";
 import crypto from "node:crypto";
 import { requireAuth } from "../middlewares/auth";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -127,12 +128,14 @@ router.get("/users/me", requireAuth, async (req: Request, res: Response, next: N
 /**
  * DELETE /account — Apple-required account deletion endpoint.
  * Also aliased at DELETE /users/me for API consistency.
- * Removes the user record and all associated data via DB cascade.
+ * Deletes the user from Clerk AND removes all local data via DB cascade.
  */
 async function handleDeleteAccount(req: Request, res: Response, next: NextFunction) {
   try {
+    const clerkUserId = req.clerkUserId!;
+
     const user = await db.query.users.findFirst({
-      where: eq(users.clerkUserId, req.clerkUserId!),
+      where: eq(users.clerkUserId, clerkUserId),
     });
 
     if (!user) {
@@ -140,8 +143,26 @@ async function handleDeleteAccount(req: Request, res: Response, next: NextFuncti
       return;
     }
 
-    // Hard delete — cascade via FK constraints removes plans, steps, usage, referrals
+    // Hard delete from local DB — cascade via FK constraints removes plans, steps, usage, referrals
     await db.delete(users).where(eq(users.id, user.id));
+
+    // Delete from Clerk — do this after DB deletion so local data is always cleaned up
+    const clerkRes = await fetch(`https://api.clerk.com/v1/users/${clerkUserId}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${process.env.CLERK_SECRET_KEY}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!clerkRes.ok && clerkRes.status !== 404) {
+      // Log the failure but don't block the response — local data is already gone
+      logger.warn(
+        { clerkUserId, status: clerkRes.status },
+        "Failed to delete Clerk user; local data already removed",
+      );
+    }
+
     res.status(204).send();
   } catch (err) {
     next(err);
