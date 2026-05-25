@@ -2,18 +2,21 @@ import { useAuth } from "@clerk/expo";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
-import React, { useLayoutEffect, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
+  Animated,
+  PanResponder,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { useColors } from "@/hooks/useColors";
 import {
@@ -23,24 +26,21 @@ import {
   useReorderSteps,
   getGetPlanQueryKey,
 } from "@workspace/api-client-react";
-import type { Step, StepWithChildren } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import type { PlanWithSteps, Step, StepWithChildren } from "@workspace/api-client-react";
 
-type FlatStep = Step & {
-  hasChildren: boolean;
-  children: Step[];
-};
+// ─── Helpers ──────────────────────────────────────────────────────────────
 
-function flattenSteps(steps: StepWithChildren[]): FlatStep[] {
-  const flat: FlatStep[] = [];
-  for (const step of steps) {
-    flat.push({ ...step, hasChildren: step.children.length > 0, children: step.children });
-    for (const child of step.children) {
-      flat.push({ ...child, hasChildren: false, children: [] });
-    }
-  }
-  return flat;
+function getChildren(
+  stepId: number,
+  planStep: StepWithChildren | undefined,
+  expandedMap: Map<number, Step[]>,
+): Step[] {
+  if (expandedMap.has(stepId)) return expandedMap.get(stepId)!;
+  if (planStep) return planStep.children;
+  return [];
 }
+
+// ─── Main Component ───────────────────────────────────────────────────────
 
 export default function PlanDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -52,23 +52,114 @@ export default function PlanDetailScreen() {
   const queryClient = useQueryClient();
   const { isSignedIn } = useAuth();
 
-  const { data: plan, isLoading, error } = useGetPlan({ id: planId });
+  const { data: plan, isLoading, error } = useGetPlan(planId);
+
+  // Keep a ref for PanResponder closures (avoids stale state)
+  const planRef = useRef<PlanWithSteps | undefined>(undefined);
+  useEffect(() => { planRef.current = plan; }, [plan]);
 
   const expandStep = useExpandStep();
   const updateStep = useUpdateStep();
   const reorderSteps = useReorderSteps();
 
+  // Infinite depth: stepId → dynamically loaded children
+  const [expandedMap, setExpandedMap] = useState<Map<number, Step[]>>(new Map());
   const [expandingIds, setExpandingIds] = useState<Set<number>>(new Set());
+
+  // Inline editing
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
 
+  // ─── Drag-to-reorder state ────────────────────────────────────────────
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragSourceIdx, setDragSourceIdx] = useState<number | null>(null);
+  const [dragTargetIdx, setDragTargetIdx] = useState<number | null>(null);
+
+  // Refs to avoid stale closures inside PanResponder
+  const isDraggingRef = useRef(false);
+  const dragSourceRef = useRef<number | null>(null);
+  const dragTargetRef = useRef<number | null>(null);
+  const activatedByHandleRef = useRef(false);
+  const itemLayouts = useRef<Array<{ y: number; height: number }>>([]);
+  const dragY = useRef(new Animated.Value(0)).current;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => activatedByHandleRef.current,
+      onMoveShouldSetPanResponder: () => activatedByHandleRef.current,
+
+      onPanResponderGrant: () => {
+        if (!activatedByHandleRef.current || dragSourceRef.current === null) return;
+        isDraggingRef.current = true;
+        dragY.setValue(0);
+        dragTargetRef.current = dragSourceRef.current;
+        setIsDragging(true);
+        setDragTargetIdx(dragSourceRef.current);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      },
+
+      onPanResponderMove: (_, gesture) => {
+        if (!isDraggingRef.current || dragSourceRef.current === null) return;
+        dragY.setValue(gesture.dy);
+
+        const srcLayout = itemLayouts.current[dragSourceRef.current];
+        if (!srcLayout) return;
+        const ghostCenterY = srcLayout.y + srcLayout.height / 2 + gesture.dy;
+
+        let target = dragSourceRef.current;
+        const layouts = itemLayouts.current;
+        for (let i = 0; i < layouts.length; i++) {
+          const l = layouts[i];
+          if (!l) continue;
+          if (ghostCenterY < l.y + l.height / 2) {
+            target = i;
+            break;
+          }
+          target = i;
+        }
+
+        if (target !== dragTargetRef.current) {
+          dragTargetRef.current = target;
+          setDragTargetIdx(target);
+          if (target !== dragSourceRef.current) {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          }
+        }
+      },
+
+      onPanResponderRelease: () => {
+        const from = dragSourceRef.current;
+        const to = dragTargetRef.current;
+        isDraggingRef.current = false;
+        activatedByHandleRef.current = false;
+        dragY.setValue(0);
+        setIsDragging(false);
+        setDragSourceIdx(null);
+        setDragTargetIdx(null);
+        dragSourceRef.current = null;
+        dragTargetRef.current = null;
+        if (from !== null && to !== null && from !== to) doReorder(from, to);
+      },
+
+      onPanResponderTerminate: () => {
+        isDraggingRef.current = false;
+        activatedByHandleRef.current = false;
+        dragY.setValue(0);
+        setIsDragging(false);
+        setDragSourceIdx(null);
+        setDragTargetIdx(null);
+        dragSourceRef.current = null;
+        dragTargetRef.current = null;
+      },
+    }),
+  ).current;
+
   useLayoutEffect(() => {
-    if (plan?.title) {
-      navigation.setOptions({ title: plan.title });
-    }
+    if (plan?.title) navigation.setOptions({ title: plan.title });
   }, [plan?.title, navigation]);
 
-  // Auth gate: prompt sign-in if guest tries a protected action
+  // ─── Auth gate ────────────────────────────────────────────────────────
+
   const withAuth = (action: () => void) => {
     if (!isSignedIn) {
       Alert.alert(
@@ -76,10 +167,7 @@ export default function PlanDetailScreen() {
         "Create a free account to edit and expand your plan steps.",
         [
           { text: "Not Now", style: "cancel" },
-          {
-            text: "Sign In",
-            onPress: () => router.push("/(auth)/sign-in"),
-          },
+          { text: "Sign In", onPress: () => router.push("/(auth)/sign-in") },
         ],
       );
       return;
@@ -87,69 +175,186 @@ export default function PlanDetailScreen() {
     action();
   };
 
+  // ─── Handlers ─────────────────────────────────────────────────────────
+
   const handleExpand = (stepId: number) => {
     withAuth(async () => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      setExpandingIds((prev) => new Set(prev).add(stepId));
+      setExpandingIds((p) => new Set(p).add(stepId));
       try {
-        await expandStep.mutateAsync({ id: stepId });
-        queryClient.invalidateQueries({ queryKey: getGetPlanQueryKey({ id: planId }) });
+        const result = await expandStep.mutateAsync({ id: stepId });
+        setExpandedMap((p) => new Map(p).set(stepId, result.children));
+        queryClient.invalidateQueries({ queryKey: getGetPlanQueryKey(planId) });
       } catch {
         Alert.alert("Error", "Could not expand this step. Please try again.");
       } finally {
-        setExpandingIds((prev) => {
-          const next = new Set(prev);
-          next.delete(stepId);
-          return next;
+        setExpandingIds((p) => {
+          const n = new Set(p);
+          n.delete(stepId);
+          return n;
         });
       }
     });
   };
 
-  const handleStartEdit = (step: FlatStep) => {
+  const handleStartEdit = (stepId: number, text: string) => {
     withAuth(() => {
-      setEditingId(step.id);
-      setEditText(step.text);
+      setEditingId(stepId);
+      setEditText(text);
     });
   };
 
   const handleSaveEdit = async () => {
     if (editingId === null) return;
+    const savedId = editingId;
     const text = editText.trim();
     setEditingId(null);
     if (!text) return;
     try {
-      await updateStep.mutateAsync({ id: editingId, data: { text } });
-      queryClient.invalidateQueries({ queryKey: getGetPlanQueryKey({ id: planId }) });
+      await updateStep.mutateAsync({ id: savedId, data: { text } });
+      queryClient.invalidateQueries({ queryKey: getGetPlanQueryKey(planId) });
     } catch {
       Alert.alert("Error", "Could not save your edit. Please try again.");
     }
   };
 
-  const handleMoveStep = (stepId: number, direction: "up" | "down") => {
-    withAuth(async () => {
-      if (!plan) return;
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      const topSteps = plan.steps;
-      const idx = topSteps.findIndex((s) => s.id === stepId);
-      if (idx < 0) return;
-      const targetIdx = direction === "up" ? idx - 1 : idx + 1;
-      if (targetIdx < 0 || targetIdx >= topSteps.length) return;
-
-      const newOrder = topSteps.map((s, i) => {
-        if (i === idx) return { id: s.id, sortOrder: topSteps[targetIdx].sortOrder };
-        if (i === targetIdx) return { id: s.id, sortOrder: topSteps[idx].sortOrder };
-        return { id: s.id, sortOrder: s.sortOrder };
-      });
-
-      try {
-        await reorderSteps.mutateAsync({ id: planId, data: { stepOrders: newOrder } });
-        queryClient.invalidateQueries({ queryKey: getGetPlanQueryKey({ id: planId }) });
-      } catch {
-        Alert.alert("Error", "Could not reorder steps. Please try again.");
-      }
-    });
+  const doReorder = async (from: number, to: number) => {
+    const steps = planRef.current?.steps;
+    if (!steps) return;
+    const reordered = [...steps];
+    const [moved] = reordered.splice(from, 1);
+    reordered.splice(to, 0, moved);
+    const stepOrders = reordered.map((s, i) => ({ id: s.id, sortOrder: i }));
+    try {
+      await reorderSteps.mutateAsync({ id: planId, data: { stepOrders } });
+      queryClient.invalidateQueries({ queryKey: getGetPlanQueryKey(planId) });
+    } catch {
+      Alert.alert("Error", "Could not reorder steps. Please try again.");
+    }
   };
+
+  // ─── Recursive step renderer ──────────────────────────────────────────
+
+  const renderStep = (
+    step: StepWithChildren | Step,
+    topIdx: number | null,  // null = not a top-level step
+    depth: number,
+    planTopStep?: StepWithChildren,
+  ): React.ReactNode => {
+    const children = getChildren(step.id, planTopStep, expandedMap);
+    const hasChildren = children.length > 0;
+    const isExpanding = expandingIds.has(step.id);
+    const isEditing = editingId === step.id;
+    const isTopLevel = depth === 0 && topIdx !== null;
+    const isDragSrc = isTopLevel && dragSourceIdx === topIdx;
+    const isDragTgt = isTopLevel && dragTargetIdx === topIdx && dragSourceIdx !== topIdx;
+
+    return (
+      <View key={`step-${step.id}`}>
+        {/* Drop target indicator */}
+        {isDragTgt && <View style={s.dropIndicator} />}
+
+        <View
+          style={[
+            s.stepRow,
+            { paddingLeft: 16 + depth * 20 },
+            isDragSrc && s.stepRowDragging,
+          ]}
+          onLayout={
+            isTopLevel && topIdx !== null
+              ? (e) => {
+                  itemLayouts.current[topIdx] = {
+                    y: e.nativeEvent.layout.y,
+                    height: e.nativeEvent.layout.height,
+                  };
+                }
+              : undefined
+          }
+        >
+          {depth > 0 && <View style={s.depthLine} />}
+
+          {/* Drag handle — top-level, auth only */}
+          {isTopLevel && isSignedIn && (
+            <Pressable
+              style={s.dragHandle}
+              onPressIn={() => {
+                if (isDraggingRef.current) return;
+                activatedByHandleRef.current = true;
+                dragSourceRef.current = topIdx!;
+                setDragSourceIdx(topIdx!);
+              }}
+              onPressOut={() => {
+                if (!isDraggingRef.current) {
+                  activatedByHandleRef.current = false;
+                  dragSourceRef.current = null;
+                  setDragSourceIdx(null);
+                }
+              }}
+              hitSlop={8}
+            >
+              <Feather name="menu" size={16} color={colors.mutedForeground} />
+            </Pressable>
+          )}
+
+          {/* Bullet */}
+          <View style={s.bulletWrap}>
+            <View
+              style={[
+                s.bullet,
+                hasChildren && {
+                  backgroundColor: colors.primary,
+                  borderColor: colors.primary,
+                },
+              ]}
+            />
+          </View>
+
+          {/* Text / Edit input */}
+          <View style={s.stepBody}>
+            {isEditing ? (
+              <TextInput
+                style={s.editInput}
+                value={editText}
+                onChangeText={setEditText}
+                multiline
+                autoFocus
+                onBlur={handleSaveEdit}
+                onSubmitEditing={handleSaveEdit}
+              />
+            ) : (
+              <Pressable onLongPress={() => handleStartEdit(step.id, step.text)}>
+                <Text style={[s.stepText, hasChildren && s.stepTextExpanded]}>
+                  {step.text}
+                </Text>
+              </Pressable>
+            )}
+          </View>
+
+          {/* Expand button */}
+          {!hasChildren && !isEditing && (
+            <Pressable
+              style={({ pressed }) => [s.iconBtn, pressed && { opacity: 0.5 }]}
+              onPress={() => handleExpand(step.id)}
+              disabled={isExpanding}
+              testID={`expand-${step.id}`}
+            >
+              {isExpanding ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Feather name="git-branch" size={15} color={colors.primary} />
+              )}
+            </Pressable>
+          )}
+        </View>
+
+        {/* Recursively render children (infinite depth) */}
+        {hasChildren &&
+          children.map((child) => renderStep(child, null, depth + 1))}
+      </View>
+    );
+  };
+
+  // ─── Render ───────────────────────────────────────────────────────────
 
   const s = makeStyles(colors, insets);
 
@@ -169,136 +374,60 @@ export default function PlanDetailScreen() {
     );
   }
 
-  const flatSteps = flattenSteps(plan.steps);
-  const topLevelIds = plan.steps.map((s) => s.id);
-
-  const renderStep = ({ item }: { item: FlatStep }) => {
-    const isEditing = editingId === item.id;
-    const isExpanding = expandingIds.has(item.id);
-    const isTopLevel = item.depth === 0;
-    const topIdx = isTopLevel ? topLevelIds.indexOf(item.id) : -1;
-
-    return (
-      <View style={[s.stepRow, { paddingLeft: 20 + item.depth * 20 }]}>
-        {item.depth > 0 && <View style={s.depthLine} />}
-        <View style={s.stepContent}>
-          <View style={s.stepBullet}>
-            <View
-              style={[
-                s.bullet,
-                item.hasChildren && { backgroundColor: colors.primary, borderColor: colors.primary },
-              ]}
-            />
-          </View>
-          <View style={s.stepBody}>
-            {isEditing ? (
-              <TextInput
-                style={s.stepEditInput}
-                value={editText}
-                onChangeText={setEditText}
-                multiline
-                autoFocus
-                onBlur={handleSaveEdit}
-                onSubmitEditing={handleSaveEdit}
-              />
-            ) : (
-              <Pressable onLongPress={() => handleStartEdit(item)}>
-                <Text style={[s.stepText, item.hasChildren && s.stepTextParent]}>
-                  {item.text}
-                </Text>
-                {!isSignedIn && (
-                  <Text style={s.guestHint}>Long-press to edit · Sign in required</Text>
-                )}
-              </Pressable>
-            )}
-          </View>
-          <View style={s.stepActions}>
-            {!item.hasChildren && !isEditing && (
-              <Pressable
-                style={({ pressed }) => [s.iconBtn, pressed && { opacity: 0.5 }]}
-                onPress={() => handleExpand(item.id)}
-                disabled={isExpanding}
-                testID={`expand-step-${item.id}`}
-              >
-                {isExpanding ? (
-                  <ActivityIndicator size="small" color={colors.primary} />
-                ) : (
-                  <Feather name="git-branch" size={15} color={colors.primary} />
-                )}
-              </Pressable>
-            )}
-            {isTopLevel && !isEditing && (
-              <>
-                <Pressable
-                  style={({ pressed }) => [
-                    s.iconBtn,
-                    pressed && { opacity: 0.5 },
-                    topIdx === 0 && s.iconBtnDisabled,
-                  ]}
-                  onPress={() => handleMoveStep(item.id, "up")}
-                  disabled={topIdx === 0}
-                >
-                  <Feather
-                    name="arrow-up"
-                    size={14}
-                    color={topIdx === 0 ? colors.mutedForeground : colors.foreground}
-                  />
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [
-                    s.iconBtn,
-                    pressed && { opacity: 0.5 },
-                    topIdx === topLevelIds.length - 1 && s.iconBtnDisabled,
-                  ]}
-                  onPress={() => handleMoveStep(item.id, "down")}
-                  disabled={topIdx === topLevelIds.length - 1}
-                >
-                  <Feather
-                    name="arrow-down"
-                    size={14}
-                    color={
-                      topIdx === topLevelIds.length - 1
-                        ? colors.mutedForeground
-                        : colors.foreground
-                    }
-                  />
-                </Pressable>
-              </>
-            )}
-          </View>
-        </View>
-      </View>
-    );
-  };
+  const floatingStep =
+    dragSourceIdx !== null ? plan.steps[dragSourceIdx] : null;
 
   return (
     <View style={s.container}>
-      <FlatList<FlatStep>
-        data={flatSteps}
-        keyExtractor={(item) => `${item.id}-${item.depth}`}
-        renderItem={renderStep}
-        contentContainerStyle={s.listContent}
+      <ScrollView
+        scrollEnabled={!isDragging}
         showsVerticalScrollIndicator={false}
-        ListHeaderComponent={
-          <View style={s.header}>
-            <Text style={s.goalLabel}>Goal</Text>
-            <Text style={s.goalText}>{plan.goal}</Text>
-            {!isSignedIn && (
-              <Pressable
-                style={s.signInBanner}
-                onPress={() => router.push("/(auth)/sign-in")}
-              >
-                <Feather name="lock" size={13} color={colors.primary} />
-                <Text style={s.signInBannerText}>
-                  Sign in to edit, expand, and reorder steps
-                </Text>
-                <Feather name="chevron-right" size={13} color={colors.primary} />
-              </Pressable>
-            )}
-          </View>
-        }
-        ListFooterComponent={<View style={{ height: insets.bottom + 24 }} />}
-      />
+        contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
+      >
+        {/* Plan header */}
+        <View style={s.header}>
+          <Text style={s.goalLabel}>Goal</Text>
+          <Text style={s.goalText}>{plan.goal}</Text>
+          {!isSignedIn && (
+            <Pressable
+              style={s.signInBanner}
+              onPress={() => router.push("/(auth)/sign-in")}
+            >
+              <Feather name="lock" size={13} color={colors.primary} />
+              <Text style={s.signInBannerText}>
+                Sign in to edit, expand, and drag-to-reorder steps
+              </Text>
+              <Feather name="chevron-right" size={13} color={colors.primary} />
+            </Pressable>
+          )}
+        </View>
+
+        {/* Steps container with PanResponder for drag */}
+        <View {...panResponder.panHandlers} style={s.stepsContainer}>
+          {plan.steps.map((step, index) =>
+            renderStep(step, index, 0, step),
+          )}
+
+          {/* Floating ghost item while dragging */}
+          {isDragging && floatingStep && (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                s.floatingGhost,
+                {
+                  top: itemLayouts.current[dragSourceIdx!]?.y ?? 0,
+                  transform: [{ translateY: dragY }],
+                },
+              ]}
+            >
+              <Feather name="menu" size={14} color={colors.mutedForeground} />
+              <Text style={s.floatingGhostText} numberOfLines={2}>
+                {floatingStep.text}
+              </Text>
+            </Animated.View>
+          )}
+        </View>
+      </ScrollView>
     </View>
   );
 }
@@ -315,15 +444,13 @@ function makeStyles(
       justifyContent: "center",
       backgroundColor: colors.background,
     },
-    listContent: { paddingHorizontal: 0 },
     header: {
       paddingHorizontal: 20,
       paddingTop: 16,
       paddingBottom: 16,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
-      marginBottom: 8,
-      gap: 8,
+      gap: 6,
     },
     goalLabel: {
       fontSize: 11,
@@ -347,7 +474,6 @@ function makeStyles(
       borderRadius: 8,
       paddingHorizontal: 12,
       paddingVertical: 8,
-      marginTop: 4,
     },
     signInBannerText: {
       flex: 1,
@@ -355,28 +481,48 @@ function makeStyles(
       color: colors.primary,
       fontFamily: "Inter_500Medium",
     },
-    stepRow: {
-      paddingRight: 16,
+    stepsContainer: {
       position: "relative",
+      marginTop: 4,
+    },
+    dropIndicator: {
+      height: 2,
+      backgroundColor: colors.primary,
+      marginHorizontal: 16,
+      borderRadius: 1,
+    },
+    stepRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      paddingRight: 12,
+      paddingVertical: 10,
+      position: "relative",
+    },
+    stepRowDragging: {
+      opacity: 0.35,
     },
     depthLine: {
       position: "absolute",
-      left: 27,
+      left: 29,
       top: 0,
       bottom: 0,
       width: 1,
       backgroundColor: colors.border,
     },
-    stepContent: {
-      flexDirection: "row",
-      alignItems: "flex-start",
-      paddingVertical: 10,
-      gap: 8,
+    dragHandle: {
+      width: 24,
+      height: 24,
+      alignItems: "center",
+      justifyContent: "center",
+      marginRight: 2,
+      marginTop: 1,
+      flexShrink: 0,
     },
-    stepBullet: {
+    bulletWrap: {
       width: 20,
       alignItems: "center",
       paddingTop: 6,
+      flexShrink: 0,
     },
     bullet: {
       width: 7,
@@ -386,24 +532,18 @@ function makeStyles(
       borderWidth: 1,
       borderColor: colors.mutedForeground,
     },
-    stepBody: { flex: 1 },
+    stepBody: { flex: 1, paddingLeft: 6 },
     stepText: {
       fontSize: 15,
       color: colors.foreground,
       fontFamily: "Inter_400Regular",
       lineHeight: 22,
     },
-    stepTextParent: {
+    stepTextExpanded: {
       fontFamily: "Inter_600SemiBold",
       fontWeight: "600" as const,
     },
-    guestHint: {
-      fontSize: 10,
-      color: colors.mutedForeground,
-      fontFamily: "Inter_400Regular",
-      marginTop: 2,
-    },
-    stepEditInput: {
+    editInput: {
       fontSize: 15,
       color: colors.foreground,
       fontFamily: "Inter_400Regular",
@@ -415,19 +555,39 @@ function makeStyles(
       paddingVertical: 4,
       backgroundColor: colors.card,
     },
-    stepActions: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 4,
-    },
     iconBtn: {
-      width: 28,
-      height: 28,
+      width: 30,
+      height: 30,
       alignItems: "center",
       justifyContent: "center",
       borderRadius: 6,
+      flexShrink: 0,
     },
-    iconBtnDisabled: { opacity: 0.3 },
+    floatingGhost: {
+      position: "absolute",
+      left: 16,
+      right: 16,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      borderRadius: colors.radius,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.15,
+      shadowRadius: 8,
+      elevation: 8,
+    },
+    floatingGhostText: {
+      flex: 1,
+      fontSize: 14,
+      color: colors.foreground,
+      fontFamily: "Inter_500Medium",
+    },
     errorText: {
       fontSize: 15,
       color: colors.destructive,

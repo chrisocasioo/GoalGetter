@@ -22,11 +22,9 @@ import { setBaseUrl } from "@workspace/api-client-react";
 // Configure API base URL — must be done outside any component
 setBaseUrl(`https://${process.env.EXPO_PUBLIC_DOMAIN}`);
 
-// Clerk publishable key and optional proxy URL (empty in dev, auto-set in prod)
 const clerkPubKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
 const clerkProxyUrl = process.env.EXPO_PUBLIC_CLERK_PROXY_URL ?? "";
 
-// Token cache using expo-secure-store
 const tokenCache: TokenCache = {
   async getToken(key: string) {
     return SecureStore.getItemAsync(key);
@@ -39,7 +37,6 @@ const tokenCache: TokenCache = {
   },
 };
 
-// Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
@@ -52,6 +49,14 @@ function RootLayoutNav() {
       <Stack.Screen
         name="plan/[id]"
         options={{ title: "Plan", headerBackTitle: "Back" }}
+      />
+      <Stack.Screen
+        name="legal/privacy"
+        options={{ title: "Privacy Policy", headerBackTitle: "Back" }}
+      />
+      <Stack.Screen
+        name="legal/terms"
+        options={{ title: "Terms of Service", headerBackTitle: "Back" }}
       />
     </Stack>
   );

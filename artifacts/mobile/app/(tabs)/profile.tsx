@@ -24,7 +24,9 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { isSignedIn, signOut } = useAuth();
 
-  const { data: profile } = useGetMyProfile({ query: { enabled: !!isSignedIn } });
+  const { data: profile } = useGetMyProfile({
+    query: { enabled: !!isSignedIn },
+  });
   const deleteAccount = useDeleteMyAccount();
   const [copiedCode, setCopiedCode] = useState(false);
 
@@ -75,17 +77,28 @@ export default function ProfileScreen() {
             Save unlimited plans across devices and unlock Pro features
           </Text>
           <Pressable
-            style={({ pressed }) => [s.signInButton, pressed && s.buttonPressed]}
+            style={({ pressed }) => [s.signInButton, pressed && { opacity: 0.8 }]}
             onPress={() => router.push("/(auth)/sign-in")}
           >
             <Text style={s.signInButtonText}>Sign In</Text>
           </Pressable>
           <Pressable
-            style={({ pressed }) => [s.signUpButton, pressed && s.buttonPressed]}
+            style={({ pressed }) => [s.signUpButton, pressed && { opacity: 0.8 }]}
             onPress={() => router.push("/(auth)/sign-up")}
           >
             <Text style={s.signUpButtonText}>Create Account</Text>
           </Pressable>
+
+          {/* Legal links visible to guests too */}
+          <View style={s.legalRow}>
+            <Pressable onPress={() => router.push("/legal/privacy")}>
+              <Text style={s.legalLink}>Privacy Policy</Text>
+            </Pressable>
+            <Text style={s.legalSep}>·</Text>
+            <Pressable onPress={() => router.push("/legal/terms")}>
+              <Text style={s.legalLink}>Terms of Service</Text>
+            </Pressable>
+          </View>
         </View>
       </View>
     );
@@ -94,9 +107,10 @@ export default function ProfileScreen() {
   return (
     <ScrollView
       style={s.container}
-      contentContainerStyle={s.scrollContent}
+      contentContainerStyle={[s.scrollContent, { paddingBottom: insets.bottom + 32 }]}
       showsVerticalScrollIndicator={false}
     >
+      {/* Avatar */}
       <View style={s.avatarSection}>
         <View style={s.avatar}>
           <Text style={s.avatarText}>
@@ -104,17 +118,31 @@ export default function ProfileScreen() {
           </Text>
         </View>
         <Text style={s.email}>{profile?.email ?? "Loading…"}</Text>
-        <View style={s.badge}>
-          <Text style={s.badgeText}>
+        <View
+          style={[
+            s.badge,
+            profile?.subscriptionStatus === "pro" && s.badgePro,
+          ]}
+        >
+          <Text
+            style={[
+              s.badgeText,
+              profile?.subscriptionStatus === "pro" && s.badgeTextPro,
+            ]}
+          >
             {profile?.subscriptionStatus === "pro" ? "Pro" : "Free"}
           </Text>
         </View>
       </View>
 
+      {/* Referral */}
       {profile?.referralCode && (
         <View style={s.section}>
           <Text style={s.sectionTitle}>Referral Code</Text>
-          <Pressable style={s.referralCard} onPress={handleCopyReferral}>
+          <Pressable
+            style={({ pressed }) => [s.referralCard, pressed && { opacity: 0.8 }]}
+            onPress={handleCopyReferral}
+          >
             <Text style={s.referralCode}>{profile.referralCode}</Text>
             <Feather
               name={copiedCode ? "check" : "copy"}
@@ -123,15 +151,16 @@ export default function ProfileScreen() {
             />
           </Pressable>
           <Text style={s.referralHint}>
-            Share your code to earn free plans for you and a friend
+            Share your code · earn free plans for you and a friend
           </Text>
         </View>
       )}
 
+      {/* Account actions */}
       <View style={s.section}>
         <Text style={s.sectionTitle}>Account</Text>
         <Pressable
-          style={({ pressed }) => [s.menuItem, pressed && s.menuItemPressed]}
+          style={({ pressed }) => [s.menuItem, pressed && { opacity: 0.7 }]}
           onPress={handleSignOut}
         >
           <Feather name="log-out" size={18} color={colors.foreground} />
@@ -142,7 +171,7 @@ export default function ProfileScreen() {
           style={({ pressed }) => [
             s.menuItem,
             s.menuItemDanger,
-            pressed && s.menuItemPressed,
+            pressed && { opacity: 0.7 },
           ]}
           onPress={handleDeleteAccount}
         >
@@ -153,6 +182,29 @@ export default function ProfileScreen() {
           <Feather name="chevron-right" size={16} color={colors.destructive} />
         </Pressable>
       </View>
+
+      {/* Legal */}
+      <View style={s.section}>
+        <Text style={s.sectionTitle}>Legal</Text>
+        <Pressable
+          style={({ pressed }) => [s.menuItem, pressed && { opacity: 0.7 }]}
+          onPress={() => router.push("/legal/privacy")}
+        >
+          <Feather name="shield" size={18} color={colors.foreground} />
+          <Text style={s.menuItemText}>Privacy Policy</Text>
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+        </Pressable>
+        <Pressable
+          style={({ pressed }) => [s.menuItem, pressed && { opacity: 0.7 }]}
+          onPress={() => router.push("/legal/terms")}
+        >
+          <Feather name="file-text" size={18} color={colors.foreground} />
+          <Text style={s.menuItemText}>Terms of Service</Text>
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+        </Pressable>
+      </View>
+
+      <Text style={s.version}>GoalGetter v1.0</Text>
     </ScrollView>
   );
 }
@@ -162,18 +214,14 @@ function makeStyles(
   insets: ReturnType<typeof useSafeAreaInsets>,
 ) {
   return StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
-    scrollContent: {
-      paddingBottom: insets.bottom + 24,
-    },
+    container: { flex: 1, backgroundColor: colors.background },
+    scrollContent: { paddingTop: 8 },
     unauthContent: {
       flex: 1,
       paddingHorizontal: 28,
       justifyContent: "center",
       alignItems: "center",
+      paddingTop: 40,
       paddingBottom: insets.bottom + 40,
     },
     unauthIcon: {
@@ -221,6 +269,7 @@ function makeStyles(
       paddingVertical: 15,
       width: "100%",
       alignItems: "center",
+      marginBottom: 28,
     },
     signUpButtonText: {
       color: colors.primary,
@@ -228,14 +277,25 @@ function makeStyles(
       fontWeight: "600" as const,
       fontFamily: "Inter_600SemiBold",
     },
-    buttonPressed: {
-      opacity: 0.8,
+    legalRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    legalLink: {
+      fontSize: 13,
+      color: colors.mutedForeground,
+      fontFamily: "Inter_400Regular",
+      textDecorationLine: "underline",
+    },
+    legalSep: {
+      fontSize: 13,
+      color: colors.mutedForeground,
+      fontFamily: "Inter_400Regular",
     },
     avatarSection: {
       alignItems: "center",
-      paddingTop: 32,
-      paddingBottom: 24,
-      paddingHorizontal: 24,
+      paddingVertical: 28,
     },
     avatar: {
       width: 72,
@@ -253,7 +313,7 @@ function makeStyles(
       fontFamily: "Inter_700Bold",
     },
     email: {
-      fontSize: 16,
+      fontSize: 15,
       color: colors.foreground,
       fontFamily: "Inter_500Medium",
       marginBottom: 8,
@@ -264,25 +324,26 @@ function makeStyles(
       paddingHorizontal: 14,
       paddingVertical: 4,
     },
+    badgePro: { backgroundColor: colors.primary },
     badgeText: {
       fontSize: 12,
       fontWeight: "600" as const,
       color: colors.primary,
       fontFamily: "Inter_600SemiBold",
     },
+    badgeTextPro: { color: colors.primaryForeground },
     section: {
       marginHorizontal: 20,
       marginTop: 24,
     },
     sectionTitle: {
-      fontSize: 12,
+      fontSize: 11,
       fontWeight: "600" as const,
       color: colors.mutedForeground,
       fontFamily: "Inter_600SemiBold",
       textTransform: "uppercase",
       letterSpacing: 0.8,
-      marginBottom: 10,
-      paddingHorizontal: 4,
+      marginBottom: 8,
     },
     referralCard: {
       flexDirection: "row",
@@ -294,7 +355,7 @@ function makeStyles(
       borderColor: colors.border,
       paddingHorizontal: 16,
       paddingVertical: 14,
-      marginBottom: 8,
+      marginBottom: 6,
     },
     referralCode: {
       fontSize: 18,
@@ -307,7 +368,6 @@ function makeStyles(
       fontSize: 12,
       color: colors.mutedForeground,
       fontFamily: "Inter_400Regular",
-      paddingHorizontal: 4,
     },
     menuItem: {
       flexDirection: "row",
@@ -322,16 +382,20 @@ function makeStyles(
       gap: 12,
     },
     menuItemDanger: {
-      borderColor: colors.destructive + "33",
-    },
-    menuItemPressed: {
-      opacity: 0.7,
+      borderColor: `${colors.destructive}44`,
     },
     menuItemText: {
       flex: 1,
       fontSize: 15,
       color: colors.foreground,
       fontFamily: "Inter_500Medium",
+    },
+    version: {
+      textAlign: "center",
+      fontSize: 12,
+      color: colors.mutedForeground,
+      fontFamily: "Inter_400Regular",
+      marginTop: 32,
     },
   });
 }
