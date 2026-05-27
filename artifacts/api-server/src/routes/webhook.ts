@@ -45,13 +45,18 @@ async function getProEntitlementId(): Promise<string | null> {
 }
 
 /**
- * When a referee completes their first purchase, credit the referrer with 1 free month of Pro.
+ * When a referee completes their first paid purchase, credit the referrer with 1 free month of Pro.
  *
- * Design:
- * 1. Atomically transition referral from pending → credited (+ update user in one DB transaction)
- *    — this is the idempotency guard; concurrent INITIAL_PURCHASE retries update 0 rows on retry.
- * 2. After the transaction, grant via RC's promotional entitlement API so RC is the authority.
- * 3. Log but never surface RC errors — DB state is already correct as fallback.
+ * Flow (RC is the authority; DB mirrors RC):
+ * 1. Atomically claim the referral row (pending → credited) — idempotency guard.
+ *    Concurrent INITIAL_PURCHASE retries will update 0 rows and return early.
+ * 2. Fresh-read the referrer's current subscription expiry POST-transaction so we
+ *    compute a current (not stale) base for the RC grant call.
+ * 3. Call RC's grantCustomerEntitlement API. If it fails, revert the referral back
+ *    to "pending" so the next webhook re-delivery can retry.
+ * 4. Only after RC confirms success: update the referrer's subscription row in DB
+ *    using an atomic SQL GREATEST expression so concurrent credits from different
+ *    referrals stack correctly under Postgres row-level locking.
  */
 async function creditReferrerIfApplicable(refereeDbId: number, refereeClerkId: string): Promise<void> {
   try {
@@ -68,19 +73,7 @@ async function creditReferrerIfApplicable(refereeDbId: number, refereeClerkId: s
       return;
     }
 
-    // Pre-compute an estimated expiry for the RC API call (best-effort).
-    // DB update uses an atomic SQL expression instead so concurrent credits stack correctly.
-    const baseMs =
-      referrer.subscriptionExpiresAt && referrer.subscriptionExpiresAt > new Date()
-        ? referrer.subscriptionExpiresAt.getTime()
-        : Date.now();
-    const newExpiry = new Date(baseMs + THIRTY_DAYS_MS);
-
-    // Step 1: Atomically claim the referral and update referrer's DB record.
-    // - WHERE status='pending' guard: only one concurrent INITIAL_PURCHASE fires
-    // - SQL GREATEST expression: if two different referrals credit the same referrer
-    //   concurrently, Postgres row-level locking serialises the updates so each adds
-    //   exactly 30 days on top of whatever was committed by the prior one
+    // Step 1: Atomically claim the referral row (idempotency guard only — no user update yet).
     let claimed = false;
     await db.transaction(async (tx) => {
       const claimRows = await tx
@@ -89,17 +82,8 @@ async function creditReferrerIfApplicable(refereeDbId: number, refereeClerkId: s
         .where(and(eq(referrals.id, pendingReferral.id), eq(referrals.status, "pending")))
         .returning({ id: referrals.id });
 
-      if (claimRows.length === 0) return; // already credited — commit empty tx
-
+      if (claimRows.length === 0) return; // already claimed by a concurrent request
       claimed = true;
-      await tx
-        .update(users)
-        .set({
-          subscriptionStatus: "pro",
-          subscriptionExpiresAt: sql`GREATEST(COALESCE(subscription_expires_at, NOW()), NOW()) + interval '30 days'`,
-          updatedAt: new Date(),
-        })
-        .where(eq(users.id, referrer.id));
     });
 
     if (!claimed) {
@@ -107,8 +91,21 @@ async function creditReferrerIfApplicable(refereeDbId: number, refereeClerkId: s
       return;
     }
 
-    // Step 2: Grant via RC promotional entitlement API so RC is the source of truth.
-    // DB above is the fallback if this fails.
+    // Step 2: Fresh-read referrer subscription post-transaction to minimise staleness
+    // when computing the expiry to send to RC.
+    const freshReferrer = await db.query.users.findFirst({
+      where: eq(users.id, referrer.id),
+      columns: { subscriptionExpiresAt: true },
+    });
+    const baseMs =
+      freshReferrer?.subscriptionExpiresAt && freshReferrer.subscriptionExpiresAt > new Date()
+        ? freshReferrer.subscriptionExpiresAt.getTime()
+        : Date.now();
+    const newExpiry = new Date(baseMs + THIRTY_DAYS_MS);
+
+    // Step 3: Grant via RC (RC is the authority). If RC fails, revert the referral to
+    // "pending" so the next webhook delivery retries instead of silently dropping it.
+    let rcGranted = false;
     try {
       const proEntitlementId = await getProEntitlementId();
       if (proEntitlementId) {
@@ -119,16 +116,43 @@ async function creditReferrerIfApplicable(refereeDbId: number, refereeClerkId: s
           body: { entitlement_id: proEntitlementId, expires_at: newExpiry.getTime() },
         });
         if (grantError) {
-          logger.warn({ grantError, referrerId: referrer.id }, "RC grant failed — DB fallback active");
+          logger.warn({ grantError, referrerId: referrer.id }, "RC grant returned error");
         } else {
-          logger.info({ referrerId: referrer.id, newExpiry }, "RC entitlement granted for referral credit");
+          rcGranted = true;
+          logger.info({ referrerId: referrer.id, newExpiry }, "RC entitlement granted");
         }
       } else {
-        logger.warn({ referrerId: referrer.id }, "Pro entitlement ID unavailable — skipped RC grant; DB fallback active");
+        logger.warn({ referrerId: referrer.id }, "Pro entitlement ID unavailable — cannot grant via RC");
       }
     } catch (rcErr) {
-      logger.warn({ rcErr, referrerId: referrer.id }, "RC grant threw — DB fallback active");
+      logger.warn({ rcErr, referrerId: referrer.id }, "RC grant threw unexpectedly");
     }
+
+    if (!rcGranted) {
+      // Revert referral to pending so RC SDK delivery retries can re-attempt
+      try {
+        await db
+          .update(referrals)
+          .set({ status: "pending", creditedAt: null })
+          .where(eq(referrals.id, pendingReferral.id));
+        logger.info({ referralId: pendingReferral.id }, "Referral reverted to pending after RC failure — will retry on next delivery");
+      } catch (revertErr) {
+        logger.error({ revertErr, referralId: pendingReferral.id }, "CRITICAL: RC failed AND revert failed — referral may be stuck credited without RC grant");
+      }
+      return;
+    }
+
+    // Step 4: RC confirmed — mirror to DB. SQL GREATEST expression ensures two concurrent
+    // credits for the same referrer (from two different referrals) stack correctly because
+    // Postgres serialises updates to the same row under row-level locking.
+    await db
+      .update(users)
+      .set({
+        subscriptionStatus: "pro",
+        subscriptionExpiresAt: sql`GREATEST(COALESCE(subscription_expires_at, NOW()), NOW()) + interval '30 days'`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, referrer.id));
 
     logger.info(
       {
@@ -138,7 +162,7 @@ async function creditReferrerIfApplicable(refereeDbId: number, refereeClerkId: s
         refereeClerkId,
         newExpiry,
       },
-      "Referral credited — referrer granted 1 free month of Pro",
+      "Referral fully credited — referrer granted 1 free month of Pro",
     );
   } catch (err) {
     logger.error({ err, refereeDbId }, "creditReferrerIfApplicable failed — webhook still acks");
@@ -244,13 +268,15 @@ router.post(
           logger.info({ clerkUserId, eventType: event.type }, "User upgraded to Pro");
 
           // Credit referrer only on confirmed first paid conversion:
-          // - INITIAL_PURCHASE with non-trial period (period_type = NORMAL/INTRO/PROMOTIONAL or unset)
+          // - INITIAL_PURCHASE where period_type is not TRIAL (or unset = legacy/paid)
           // - RENEWAL that is a trial-to-paid conversion (is_trial_conversion = true)
-          const isFirstPaidConversion =
-            (event.type === "INITIAL_PURCHASE" && event.period_type !== "TRIAL") ||
-            (event.type === "RENEWAL" && event.is_trial_conversion === true);
-          if (isFirstPaidConversion) {
-            await creditReferrerIfApplicable(user.id, clerkUserId);
+          {
+            const isFirstPaidConversion =
+              (event.type === "INITIAL_PURCHASE" && event.period_type !== "TRIAL") ||
+              (event.type === "RENEWAL" && event.is_trial_conversion === true);
+            if (isFirstPaidConversion) {
+              await creditReferrerIfApplicable(user.id, clerkUserId);
+            }
           }
           break;
 

@@ -5,9 +5,11 @@
  * GoalGetter API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ReferralItem } from './referralItem';
 
 export interface ReferralStats {
   pendingCount: number;
   creditedCount: number;
   referralLink: string;
+  items: ReferralItem[];
 }

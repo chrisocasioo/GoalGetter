@@ -284,7 +284,13 @@ export const SyncSubscriptionResponse = zod.object({
 export const GetMyReferralsResponse = zod.object({
   "pendingCount": zod.number(),
   "creditedCount": zod.number(),
-  "referralLink": zod.string()
+  "referralLink": zod.string(),
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "status": zod.enum(['pending', 'credited']),
+  "createdAt": zod.coerce.date(),
+  "creditedAt": zod.coerce.date().nullable()
+}))
 })
 
 

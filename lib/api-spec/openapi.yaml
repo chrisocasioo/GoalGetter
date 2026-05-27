@@ -564,6 +564,27 @@ components:
         - isPro
         - canGenerate
 
+    ReferralItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+          enum: [pending, credited]
+        createdAt:
+          type: string
+          format: date-time
+        creditedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - id
+        - status
+        - createdAt
+        - creditedAt
+
     ReferralStats:
       type: object
       properties:
@@ -573,10 +594,15 @@ components:
           type: integer
         referralLink:
           type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReferralItem"
       required:
         - pendingCount
         - creditedCount
         - referralLink
+        - items
 
     SyncUserInput:
       type: object

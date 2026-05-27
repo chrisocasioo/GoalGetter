@@ -27,20 +27,22 @@ router.get(
         return;
       }
 
-      const statsRows = await db
-        .select({
-          status: referrals.status,
-          count: sql<number>`count(*)::int`,
-        })
-        .from(referrals)
-        .where(eq(referrals.referrerId, user.id))
-        .groupBy(referrals.status);
+      const items = await db.query.referrals.findMany({
+        where: eq(referrals.referrerId, user.id),
+        columns: {
+          id: true,
+          status: true,
+          createdAt: true,
+          creditedAt: true,
+        },
+        orderBy: (r, { desc }) => [desc(r.createdAt)],
+      });
 
       let pendingCount = 0;
       let creditedCount = 0;
-      for (const row of statsRows) {
-        if (row.status === "pending") pendingCount = row.count;
-        if (row.status === "credited") creditedCount = row.count;
+      for (const item of items) {
+        if (item.status === "pending") pendingCount++;
+        if (item.status === "credited") creditedCount++;
       }
 
       logger.debug({ userId: user.id, pendingCount, creditedCount }, "Referral stats fetched");
@@ -49,6 +51,12 @@ router.get(
         pendingCount,
         creditedCount,
         referralLink: buildReferralLink(user.referralCode),
+        items: items.map((item) => ({
+          id: item.id,
+          status: item.status,
+          createdAt: item.createdAt?.toISOString() ?? new Date().toISOString(),
+          creditedAt: item.creditedAt?.toISOString() ?? null,
+        })),
       });
     } catch (err) {
       next(err);

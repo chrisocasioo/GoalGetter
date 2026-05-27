@@ -255,25 +255,62 @@ export default function ProfileScreen() {
             Earn 1 free month of Pro when a friend subscribes
           </Text>
 
-          {/* Referral stats */}
-          {referralStats && (referralStats.pendingCount > 0 || referralStats.creditedCount > 0) && (
-            <View style={s.referralStats}>
-              {referralStats.pendingCount > 0 && (
-                <View style={s.referralStatItem}>
-                  <Feather name="clock" size={13} color={colors.mutedForeground} />
-                  <Text style={s.referralStatText}>
-                    {referralStats.pendingCount} pending
-                  </Text>
+          {/* Referral history */}
+          {referralStats && referralStats.items.length > 0 && (
+            <View style={s.referralHistory}>
+              <Text style={s.referralHistoryTitle}>Referral History</Text>
+              {referralStats.items.map((item) => (
+                <View key={item.id} style={s.referralHistoryItem}>
+                  <Feather
+                    name={item.status === "credited" ? "check-circle" : "clock"}
+                    size={14}
+                    color={item.status === "credited" ? "#16a34a" : colors.mutedForeground}
+                  />
+                  <View style={s.referralHistoryText}>
+                    {item.status === "credited" ? (
+                      <>
+                        <Text style={s.referralHistoryLabel}>Earned 1 month Pro</Text>
+                        {item.creditedAt && (
+                          <Text style={s.referralHistoryDate}>
+                            {new Date(item.creditedAt).toLocaleDateString(undefined, {
+                              year: "numeric",
+                              month: "short",
+                              day: "numeric",
+                            })}
+                          </Text>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <Text style={s.referralHistoryLabel}>Waiting for friend to subscribe</Text>
+                        <Text style={s.referralHistoryDate}>
+                          Referred{" "}
+                          {new Date(item.createdAt).toLocaleDateString(undefined, {
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
+                          })}
+                        </Text>
+                      </>
+                    )}
+                  </View>
+                  <View
+                    style={[
+                      s.referralStatusBadge,
+                      item.status === "credited" && s.referralStatusBadgeCredited,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        s.referralStatusBadgeText,
+                        item.status === "credited" && s.referralStatusBadgeTextCredited,
+                      ]}
+                    >
+                      {item.status === "credited" ? "Credited" : "Pending"}
+                    </Text>
+                  </View>
                 </View>
-              )}
-              {referralStats.creditedCount > 0 && (
-                <View style={s.referralStatItem}>
-                  <Feather name="check-circle" size={13} color="#16a34a" />
-                  <Text style={[s.referralStatText, { color: "#16a34a" }]}>
-                    {referralStats.creditedCount} credited
-                  </Text>
-                </View>
-              )}
+              ))}
             </View>
           )}
         </View>
@@ -602,20 +639,61 @@ function makeStyles(
       fontFamily: "Inter_400Regular",
       marginTop: 2,
     },
-    referralStats: {
-      flexDirection: "row",
-      gap: 16,
-      marginTop: 6,
+    referralHistory: {
+      marginTop: 12,
+      gap: 8,
     },
-    referralStatItem: {
+    referralHistoryTitle: {
+      fontSize: 11,
+      fontWeight: "600" as const,
+      color: colors.mutedForeground,
+      fontFamily: "Inter_600SemiBold",
+      textTransform: "uppercase",
+      letterSpacing: 0.6,
+      marginBottom: 4,
+    },
+    referralHistoryItem: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 5,
+      backgroundColor: colors.card,
+      borderRadius: colors.radius,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      gap: 10,
     },
-    referralStatText: {
-      fontSize: 12,
-      color: colors.mutedForeground,
+    referralHistoryText: {
+      flex: 1,
+    },
+    referralHistoryLabel: {
+      fontSize: 13,
+      color: colors.foreground,
       fontFamily: "Inter_500Medium",
+    },
+    referralHistoryDate: {
+      fontSize: 11,
+      color: colors.mutedForeground,
+      fontFamily: "Inter_400Regular",
+      marginTop: 1,
+    },
+    referralStatusBadge: {
+      backgroundColor: colors.muted,
+      borderRadius: 20,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+    },
+    referralStatusBadgeCredited: {
+      backgroundColor: "#dcfce7",
+    },
+    referralStatusBadgeText: {
+      fontSize: 11,
+      fontWeight: "600" as const,
+      color: colors.mutedForeground,
+      fontFamily: "Inter_600SemiBold",
+    },
+    referralStatusBadgeTextCredited: {
+      color: "#16a34a",
     },
     menuItem: {
       flexDirection: "row",

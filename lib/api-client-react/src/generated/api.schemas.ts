@@ -93,10 +93,26 @@ export interface UsageStatus {
   canGenerate: boolean;
 }
 
+export type ReferralItemStatus = typeof ReferralItemStatus[keyof typeof ReferralItemStatus];
+
+
+export const ReferralItemStatus = {
+  pending: 'pending',
+  credited: 'credited',
+} as const;
+
+export interface ReferralItem {
+  id: number;
+  status: ReferralItemStatus;
+  createdAt: string;
+  creditedAt: string | null;
+}
+
 export interface ReferralStats {
   pendingCount: number;
   creditedCount: number;
   referralLink: string;
+  items: ReferralItem[];
 }
 
 export interface SyncUserInput {

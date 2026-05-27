@@ -12,6 +12,8 @@ export * from './getUsageParams';
 export * from './healthStatus';
 export * from './plan';
 export * from './planWithSteps';
+export * from './referralItem';
+export * from './referralItemStatus';
 export * from './referralStats';
 export * from './reorderStepsInput';
 export * from './reorderStepsInputStepOrdersItem';
