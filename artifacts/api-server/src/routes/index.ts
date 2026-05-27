@@ -6,6 +6,7 @@ import stepsRouter from "./steps";
 import usageRouter from "./usage";
 import usersRouter from "./users";
 import webhookRouter from "./webhook";
+import referralsRouter from "./referrals";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use(stepsRouter);
 router.use(usageRouter);
 router.use(usersRouter);
 router.use(webhookRouter);
+router.use(referralsRouter);
 
 export default router;

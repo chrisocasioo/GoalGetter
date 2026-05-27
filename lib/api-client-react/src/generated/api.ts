@@ -26,9 +26,11 @@ import type {
   HealthStatus,
   Plan,
   PlanWithSteps,
+  ReferralStats,
   ReorderStepsInput,
   Step,
   StepWithChildren,
+  SyncSubscription200,
   SyncUserInput,
   UpdateStepInput,
   UsageStatus,
@@ -789,6 +791,155 @@ export const useSyncUser = <TError = ErrorType<ApiError>,
       > => {
       return useMutation(getSyncUserMutationOptions(options));
     }
+
+export const getSyncSubscriptionUrl = () => {
+
+
+
+
+  return `/api/subscription/sync`
+}
+
+/**
+ * Called by the mobile client immediately after a RevenueCat purchase. Verifies entitlement server-to-server with RevenueCat before granting Pro. Bridges the gap between purchase and webhook delivery for immediate activation.
+
+ * @summary Sync subscription status after a successful purchase
+ */
+export const syncSubscription = async ( options?: RequestInit): Promise<SyncSubscription200> => {
+
+  return customFetch<SyncSubscription200>(getSyncSubscriptionUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getSyncSubscriptionMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof syncSubscription>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof syncSubscription>>, TError,void, TContext> => {
+
+const mutationKey = ['syncSubscription'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof syncSubscription>>, void> = () => {
+
+
+          return  syncSubscription(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SyncSubscriptionMutationResult = NonNullable<Awaited<ReturnType<typeof syncSubscription>>>
+
+    export type SyncSubscriptionMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Sync subscription status after a successful purchase
+ */
+export const useSyncSubscription = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof syncSubscription>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof syncSubscription>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getSyncSubscriptionMutationOptions(options));
+    }
+
+export const getGetMyReferralsUrl = () => {
+
+
+
+
+  return `/api/referrals/me`
+}
+
+/**
+ * @summary Get referral stats for the current user
+ */
+export const getMyReferrals = async ( options?: RequestInit): Promise<ReferralStats> => {
+
+  return customFetch<ReferralStats>(getGetMyReferralsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMyReferralsQueryKey = () => {
+    return [
+    `/api/referrals/me`
+    ] as const;
+    }
+
+
+export const getGetMyReferralsQueryOptions = <TData = Awaited<ReturnType<typeof getMyReferrals>>, TError = ErrorType<ApiError>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMyReferrals>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMyReferralsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMyReferrals>>> = ({ signal }) => getMyReferrals({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMyReferrals>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMyReferralsQueryResult = NonNullable<Awaited<ReturnType<typeof getMyReferrals>>>
+export type GetMyReferralsQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Get referral stats for the current user
+ */
+
+export function useGetMyReferrals<TData = Awaited<ReturnType<typeof getMyReferrals>>, TError = ErrorType<ApiError>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMyReferrals>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMyReferralsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getGetMyProfileUrl = () => {
 

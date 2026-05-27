@@ -1,12 +1,77 @@
 import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
 import { db } from "@workspace/db";
-import { users } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { users, referrals } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
 const WEBHOOK_SECRET = process.env.REVENUECAT_WEBHOOK_SECRET;
+
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * When a referee completes their first purchase, credit the referrer with 1 free month of Pro.
+ * Idempotent: only credits once (pending → credited transition).
+ */
+async function creditReferrerIfApplicable(refereeDbId: number, refereeClerkId: string): Promise<void> {
+  try {
+    const pendingReferral = await db.query.referrals.findFirst({
+      where: and(eq(referrals.refereeId, refereeDbId), eq(referrals.status, "pending")),
+    });
+
+    if (!pendingReferral) {
+      return;
+    }
+
+    const referrer = await db.query.users.findFirst({
+      where: eq(users.id, pendingReferral.referrerId),
+    });
+
+    if (!referrer) {
+      logger.warn(
+        { referralId: pendingReferral.id, referrerId: pendingReferral.referrerId },
+        "Referral referrer not found",
+      );
+      return;
+    }
+
+    // Extend or grant 1 month of Pro — stack on top of existing expiry if already Pro
+    const baseMs =
+      referrer.subscriptionExpiresAt && referrer.subscriptionExpiresAt > new Date()
+        ? referrer.subscriptionExpiresAt.getTime()
+        : Date.now();
+    const newExpiry = new Date(baseMs + THIRTY_DAYS_MS);
+
+    await db
+      .update(users)
+      .set({
+        subscriptionStatus: "pro",
+        subscriptionExpiresAt: newExpiry,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, referrer.id));
+
+    await db
+      .update(referrals)
+      .set({ status: "credited", creditedAt: new Date() })
+      .where(eq(referrals.id, pendingReferral.id));
+
+    logger.info(
+      {
+        referralId: pendingReferral.id,
+        referrerId: referrer.id,
+        referrerClerkId: referrer.clerkUserId,
+        refereeClerkId,
+        newExpiry,
+      },
+      "Referral credited — referrer granted 1 month Pro",
+    );
+  } catch (err) {
+    // Never let referral crediting fail the webhook response
+    logger.error({ err, refereeDbId }, "Failed to credit referrer");
+  }
+}
 
 type RevenueCatEventType =
   | "INITIAL_PURCHASE"
@@ -106,6 +171,11 @@ router.post(
             })
             .where(eq(users.id, user.id));
           logger.info({ clerkUserId, eventType: event.type }, "User upgraded to Pro");
+
+          // On a first-ever purchase, check if this user was referred and credit the referrer
+          if (event.type === "INITIAL_PURCHASE") {
+            await creditReferrerIfApplicable(user.id, clerkUserId);
+          }
           break;
 
         case "CANCELLATION":

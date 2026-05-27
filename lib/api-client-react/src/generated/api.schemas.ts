@@ -93,6 +93,12 @@ export interface UsageStatus {
   canGenerate: boolean;
 }
 
+export interface ReferralStats {
+  pendingCount: number;
+  creditedCount: number;
+  referralLink: string;
+}
+
 export interface SyncUserInput {
   clerkUserId: string;
   email: string;
@@ -111,5 +117,9 @@ export interface UserProfile {
 
 export type GetUsageParams = {
 guestSessionId?: string;
+};
+
+export type SyncSubscription200 = {
+  subscriptionStatus: string;
 };
 

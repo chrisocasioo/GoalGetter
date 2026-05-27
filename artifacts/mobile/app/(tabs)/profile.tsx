@@ -1,5 +1,6 @@
 import { useAuth } from "@clerk/expo";
 import { Feather } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -8,6 +9,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -19,6 +21,7 @@ import { useSubscription } from "@/lib/revenuecat";
 import {
   useDeleteMyAccount,
   useGetMyProfile,
+  useGetMyReferrals,
 } from "@workspace/api-client-react";
 
 export default function ProfileScreen() {
@@ -30,8 +33,11 @@ export default function ProfileScreen() {
   const { data: profile } = useGetMyProfile({
     query: { enabled: !!isSignedIn },
   });
+  const { data: referralStats } = useGetMyReferrals({
+    query: { enabled: !!isSignedIn },
+  });
   const deleteAccount = useDeleteMyAccount();
-  const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const { isSubscribed: rcSubscribed, expirationDate: rcExpirationDate } = useSubscription();
   // Use server-verified subscription state (from DB/webhook) as primary source,
   // fall back to RC client state for immediate feedback right after purchase
@@ -67,10 +73,25 @@ export default function ProfileScreen() {
     );
   };
 
-  const handleCopyReferral = () => {
-    if (profile?.referralCode) {
-      setCopiedCode(true);
-      setTimeout(() => setCopiedCode(false), 2000);
+  const referralLink = referralStats?.referralLink ?? (
+    profile?.referralCode ? `mobile://ref/${profile.referralCode}` : null
+  );
+
+  const handleCopyReferral = async () => {
+    if (!referralLink) return;
+    await Clipboard.setStringAsync(referralLink);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
+
+  const handleShareReferral = async () => {
+    if (!referralLink) return;
+    try {
+      await Share.share({
+        message: `Try GoalGetter — use my link to get a free trial: ${referralLink}`,
+        url: referralLink,
+      });
+    } catch {
     }
   };
 
@@ -204,21 +225,57 @@ export default function ProfileScreen() {
       {/* Referral */}
       {profile?.referralCode && (
         <View style={s.section}>
-          <Text style={s.sectionTitle}>Referral Code</Text>
-          <Pressable
-            style={({ pressed }) => [s.referralCard, pressed && { opacity: 0.8 }]}
-            onPress={handleCopyReferral}
-          >
-            <Text style={s.referralCode}>{profile.referralCode}</Text>
-            <Feather
-              name={copiedCode ? "check" : "copy"}
-              size={16}
-              color={copiedCode ? colors.primary : colors.mutedForeground}
-            />
-          </Pressable>
+          <Text style={s.sectionTitle}>Invite a Friend</Text>
+          <View style={s.referralCard}>
+            <View style={s.referralLinkRow}>
+              <Text style={s.referralLinkText} numberOfLines={1} ellipsizeMode="middle">
+                {referralLink ?? ""}
+              </Text>
+              <Pressable
+                style={({ pressed }) => [s.referralIconBtn, pressed && { opacity: 0.7 }]}
+                onPress={handleCopyReferral}
+                accessibilityLabel="Copy referral link"
+              >
+                <Feather
+                  name={copiedLink ? "check" : "copy"}
+                  size={16}
+                  color={copiedLink ? colors.primary : colors.mutedForeground}
+                />
+              </Pressable>
+            </View>
+            <Pressable
+              style={({ pressed }) => [s.shareButton, pressed && { opacity: 0.85 }]}
+              onPress={handleShareReferral}
+            >
+              <Feather name="share-2" size={15} color={colors.primaryForeground} />
+              <Text style={s.shareButtonText}>Share Link</Text>
+            </Pressable>
+          </View>
           <Text style={s.referralHint}>
-            Share your code · earn free plans for you and a friend
+            Earn 1 free month of Pro when a friend subscribes
           </Text>
+
+          {/* Referral stats */}
+          {referralStats && (referralStats.pendingCount > 0 || referralStats.creditedCount > 0) && (
+            <View style={s.referralStats}>
+              {referralStats.pendingCount > 0 && (
+                <View style={s.referralStatItem}>
+                  <Feather name="clock" size={13} color={colors.mutedForeground} />
+                  <Text style={s.referralStatText}>
+                    {referralStats.pendingCount} pending
+                  </Text>
+                </View>
+              )}
+              {referralStats.creditedCount > 0 && (
+                <View style={s.referralStatItem}>
+                  <Feather name="check-circle" size={13} color="#16a34a" />
+                  <Text style={[s.referralStatText, { color: "#16a34a" }]}>
+                    {referralStats.creditedCount} credited
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
         </View>
       )}
 
@@ -500,28 +557,65 @@ function makeStyles(
       marginTop: 2,
     },
     referralCard: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
       backgroundColor: colors.card,
       borderRadius: colors.radius,
       borderWidth: 1,
       borderColor: colors.border,
       paddingHorizontal: 16,
-      paddingVertical: 14,
+      paddingTop: 14,
+      paddingBottom: 12,
       marginBottom: 6,
+      gap: 10,
     },
-    referralCode: {
-      fontSize: 18,
-      fontWeight: "700" as const,
-      color: colors.primary,
-      fontFamily: "Inter_700Bold",
-      letterSpacing: 2,
+    referralLinkRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    referralLinkText: {
+      flex: 1,
+      fontSize: 13,
+      color: colors.foreground,
+      fontFamily: "Inter_400Regular",
+    },
+    referralIconBtn: {
+      padding: 4,
+    },
+    shareButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.primary,
+      borderRadius: colors.radius,
+      paddingVertical: 10,
+      gap: 6,
+    },
+    shareButtonText: {
+      fontSize: 14,
+      fontWeight: "600" as const,
+      color: colors.primaryForeground,
+      fontFamily: "Inter_600SemiBold",
     },
     referralHint: {
       fontSize: 12,
       color: colors.mutedForeground,
       fontFamily: "Inter_400Regular",
+      marginTop: 2,
+    },
+    referralStats: {
+      flexDirection: "row",
+      gap: 16,
+      marginTop: 6,
+    },
+    referralStatItem: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+    },
+    referralStatText: {
+      fontSize: 12,
+      color: colors.mutedForeground,
+      fontFamily: "Inter_500Medium",
     },
     menuItem: {
       flexDirection: "row",

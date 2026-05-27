@@ -269,6 +269,26 @@ export const SyncUserResponse = zod.object({
 
 
 /**
+ * Called by the mobile client immediately after a RevenueCat purchase. Verifies entitlement server-to-server with RevenueCat before granting Pro. Bridges the gap between purchase and webhook delivery for immediate activation.
+
+ * @summary Sync subscription status after a successful purchase
+ */
+export const SyncSubscriptionResponse = zod.object({
+  "subscriptionStatus": zod.string()
+})
+
+
+/**
+ * @summary Get referral stats for the current user
+ */
+export const GetMyReferralsResponse = zod.object({
+  "pendingCount": zod.number(),
+  "creditedCount": zod.number(),
+  "referralLink": zod.string()
+})
+
+
+/**
  * @summary Get current user profile
  */
 export const GetMyProfileResponse = zod.object({

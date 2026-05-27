@@ -296,6 +296,31 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /referrals/me:
+    get:
+      operationId: getMyReferrals
+      tags: [users]
+      summary: Get referral stats for the current user
+      responses:
+        "200":
+          description: Referral stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReferralStats"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /users/me:
     get:
       operationId: getMyProfile
@@ -538,6 +563,20 @@ components:
         - limit
         - isPro
         - canGenerate
+
+    ReferralStats:
+      type: object
+      properties:
+        pendingCount:
+          type: integer
+        creditedCount:
+          type: integer
+        referralLink:
+          type: string
+      required:
+        - pendingCount
+        - creditedCount
+        - referralLink
 
     SyncUserInput:
       type: object

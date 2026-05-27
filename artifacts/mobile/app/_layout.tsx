@@ -78,6 +78,10 @@ function RootLayoutNav() {
         options={{ title: "GoalGetter Pro", headerShown: false }}
       />
       <Stack.Screen
+        name="ref/[code]"
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
         name="legal/privacy"
         options={{ title: "Privacy Policy", headerBackTitle: "Back" }}
       />
