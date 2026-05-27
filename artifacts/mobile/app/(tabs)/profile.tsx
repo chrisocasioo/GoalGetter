@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ICON_STORAGE_KEY, THEME_ORDER, THEMES, type ThemeId, useTheme } from "@/context/ThemeContext";
+import { LEGAL_URLS } from "@/constants/urls";
 import { useColors } from "@/hooks/useColors";
 import { APP_ICONS, type AppIconId, getAppIcon, setAppIcon } from "@/lib/appIcon";
 import { useSubscription } from "@/lib/revenuecat";
@@ -194,11 +195,11 @@ export default function ProfileScreen() {
           </Pressable>
 
           <View style={s.legalRow}>
-            <Pressable onPress={() => router.push("/legal/privacy")}>
+            <Pressable onPress={() => Linking.openURL(LEGAL_URLS.privacy)}>
               <Text style={s.legalLink}>Privacy Policy</Text>
             </Pressable>
             <Text style={s.legalSep}>·</Text>
-            <Pressable onPress={() => router.push("/legal/terms")}>
+            <Pressable onPress={() => Linking.openURL(LEGAL_URLS.terms)}>
               <Text style={s.legalLink}>Terms of Service</Text>
             </Pressable>
           </View>
@@ -482,7 +483,7 @@ export default function ProfileScreen() {
         <Text style={s.sectionTitle}>Legal</Text>
         <Pressable
           style={({ pressed }) => [s.menuItem, pressed && { opacity: 0.7 }]}
-          onPress={() => router.push("/legal/privacy")}
+          onPress={() => Linking.openURL(LEGAL_URLS.privacy)}
         >
           <Feather name="shield" size={18} color={colors.foreground} />
           <Text style={s.menuItemText}>Privacy Policy</Text>
@@ -490,7 +491,7 @@ export default function ProfileScreen() {
         </Pressable>
         <Pressable
           style={({ pressed }) => [s.menuItem, pressed && { opacity: 0.7 }]}
-          onPress={() => router.push("/legal/terms")}
+          onPress={() => Linking.openURL(LEGAL_URLS.terms)}
         >
           <Feather name="file-text" size={18} color={colors.foreground} />
           <Text style={s.menuItemText}>Terms of Service</Text>
