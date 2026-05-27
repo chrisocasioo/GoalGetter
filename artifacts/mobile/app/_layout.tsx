@@ -23,7 +23,7 @@ import { AuthSync } from "@/context/AuthContext";
 import { ICON_STORAGE_KEY, ThemeProvider, useTheme } from "@/context/ThemeContext";
 import { initializeRevenueCat, SubscriptionProvider, useSubscription } from "@/lib/revenuecat";
 import { setAppIcon } from "@/lib/appIcon";
-import { setBaseUrl } from "@workspace/api-client-react";
+import { setBaseUrl, useGetMyProfile } from "@workspace/api-client-react";
 
 setBaseUrl(`https://${process.env.EXPO_PUBLIC_DOMAIN}`);
 
@@ -54,20 +54,34 @@ const queryClient = new QueryClient();
 
 /**
  * Enforces Pro-only entitlements at the app level.
- * Resets theme to "default" and icon to "default" whenever the user is not an
- * active subscriber — including after subscription expiry, refund, or restart.
- * Must be rendered inside both <ThemeProvider> and <SubscriptionProvider>.
+ * Resets theme to "default" and icon to "default" whenever the user is
+ * definitively non-subscribed — including after subscription expiry or refund.
+ *
+ * Crucially, enforcement only fires once BOTH the RC entitlement query AND the
+ * server-verified profile have finished loading, preventing premature resets
+ * during cold-start before subscription status is known.
+ *
+ * Must be rendered inside <ThemeProvider>, <SubscriptionProvider>, and
+ * <QueryClientProvider> (profile query uses react-query).
  */
 function AppEntitlementEnforcer() {
-  const { isSubscribed } = useSubscription();
+  const { isSubscribed: rcSubscribed, isLoading: rcLoading } = useSubscription();
+  const { data: profile, isLoading: profileLoading } = useGetMyProfile({});
   const { themeId, setThemeId } = useTheme();
 
+  const isLoading = rcLoading || profileLoading;
+  const serverIsSubscribed = profile?.subscriptionStatus === "pro";
+  const isSubscribed = serverIsSubscribed || rcSubscribed;
+
   useEffect(() => {
+    // Never enforce until both sources have resolved — avoids false resets on boot
+    if (isLoading) return;
     if (isSubscribed) return;
+
+    // User is definitively non-Pro — coerce theme and icon to default
     if (themeId !== "default") {
       setThemeId("default");
     }
-    // Reset icon preference and OS icon to default
     AsyncStorage.getItem(ICON_STORAGE_KEY)
       .then((stored) => {
         if (stored && stored !== "default") {
@@ -76,7 +90,7 @@ function AppEntitlementEnforcer() {
         }
       })
       .catch(() => {});
-  }, [isSubscribed, themeId, setThemeId]);
+  }, [isLoading, isSubscribed, themeId, setThemeId]);
 
   return null;
 }
