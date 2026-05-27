@@ -28,7 +28,24 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-dynamic-app-icon",
+        {
+          "midnight": {
+            "image": "./assets/images/icon-midnight.png",
+            "prerendered": true
+          },
+          "ocean": {
+            "image": "./assets/images/icon-ocean.png",
+            "prerendered": true
+          },
+          "forest": {
+            "image": "./assets/images/icon-forest.png",
+            "prerendered": true
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

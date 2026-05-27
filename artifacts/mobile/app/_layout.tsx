@@ -19,6 +19,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthSync } from "@/context/AuthContext";
+import { ThemeProvider } from "@/context/ThemeContext";
 import { initializeRevenueCat, SubscriptionProvider } from "@/lib/revenuecat";
 import { setBaseUrl } from "@workspace/api-client-react";
 
@@ -117,17 +118,19 @@ export default function RootLayout() {
     >
       <SafeAreaProvider>
         <ErrorBoundary>
-          <QueryClientProvider client={queryClient}>
-            <SubscriptionProvider>
-              <GestureHandlerRootView>
-                <KeyboardProvider>
-                  <AuthSync />
-                  <RevenueCatAuth />
-                  <RootLayoutNav />
-                </KeyboardProvider>
-              </GestureHandlerRootView>
-            </SubscriptionProvider>
-          </QueryClientProvider>
+          <ThemeProvider>
+            <QueryClientProvider client={queryClient}>
+              <SubscriptionProvider>
+                <GestureHandlerRootView>
+                  <KeyboardProvider>
+                    <AuthSync />
+                    <RevenueCatAuth />
+                    <RootLayoutNav />
+                  </KeyboardProvider>
+                </GestureHandlerRootView>
+              </SubscriptionProvider>
+            </QueryClientProvider>
+          </ThemeProvider>
         </ErrorBoundary>
       </SafeAreaProvider>
     </ClerkProvider>

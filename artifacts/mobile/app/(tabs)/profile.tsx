@@ -2,7 +2,7 @@ import { useAuth } from "@clerk/expo";
 import { Feather } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Alert,
   Linking,
@@ -16,7 +16,9 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { THEME_ORDER, THEMES, type ThemeId, useTheme } from "@/context/ThemeContext";
 import { useColors } from "@/hooks/useColors";
+import { APP_ICONS, type AppIconId, getAppIcon, setAppIcon } from "@/lib/appIcon";
 import { useSubscription } from "@/lib/revenuecat";
 import {
   useDeleteMyAccount,
@@ -29,6 +31,7 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { isSignedIn, signOut } = useAuth();
+  const { themeId, setThemeId } = useTheme();
 
   const { data: profile } = useGetMyProfile({
     query: { enabled: !!isSignedIn },
@@ -38,11 +41,49 @@ export default function ProfileScreen() {
   });
   const deleteAccount = useDeleteMyAccount();
   const [copiedLink, setCopiedLink] = useState(false);
+  const [currentIconId, setCurrentIconId] = useState<AppIconId>("default");
+  const [settingIcon, setSettingIcon] = useState(false);
   const { isSubscribed: rcSubscribed, expirationDate: rcExpirationDate } = useSubscription();
+
   // Use server-verified subscription state (from DB/webhook) as primary source,
   // fall back to RC client state for immediate feedback right after purchase
   const serverIsSubscribed = profile?.subscriptionStatus === "pro";
   const isSubscribed = serverIsSubscribed || rcSubscribed;
+
+  useEffect(() => {
+    getAppIcon().then(setCurrentIconId).catch(() => {});
+  }, []);
+
+  const handleSelectTheme = (id: ThemeId) => {
+    if (!isSubscribed && id !== "default") {
+      router.push("/paywall");
+      return;
+    }
+    setThemeId(id);
+  };
+
+  const handleSelectIcon = async (iconId: AppIconId) => {
+    if (!isSubscribed && iconId !== "default") {
+      router.push("/paywall");
+      return;
+    }
+    if (iconId === currentIconId) return;
+    setSettingIcon(true);
+    try {
+      const ok = await setAppIcon(iconId);
+      setCurrentIconId(iconId);
+      if (!ok) {
+        Alert.alert(
+          "Icon Updated",
+          "Your icon preference has been saved. The home screen icon will update after the next app install.",
+        );
+      }
+    } catch {
+      Alert.alert("Error", "Could not change app icon. Please try again.");
+    } finally {
+      setSettingIcon(false);
+    }
+  };
   const expirationDate =
     (profile?.subscriptionExpiresAt ? new Date(profile.subscriptionExpiresAt) : null) ??
     rcExpirationDate;
@@ -315,6 +356,83 @@ export default function ProfileScreen() {
           )}
         </View>
       )}
+
+      {/* Appearance — Themes */}
+      <View style={s.section}>
+        <Text style={s.sectionTitle}>Themes</Text>
+        {THEME_ORDER.map((id) => {
+          const theme = THEMES[id];
+          const isActive = themeId === id;
+          const isLocked = !isSubscribed && id !== "default";
+          return (
+            <Pressable
+              key={id}
+              style={({ pressed }) => [
+                s.themeRow,
+                isActive && s.themeRowActive,
+                pressed && { opacity: 0.75 },
+              ]}
+              onPress={() => handleSelectTheme(id)}
+              accessibilityLabel={`Apply ${theme.name} theme`}
+            >
+              <View style={s.themeSwatchGroup}>
+                <View style={[s.themeSwatchBig, { backgroundColor: theme.previewBg }]}>
+                  <View style={[s.themeSwatchDot, { backgroundColor: theme.previewAccent }]} />
+                </View>
+              </View>
+              <Text style={s.themeRowName}>{theme.name}</Text>
+              {isLocked && (
+                <View style={s.proLockBadge}>
+                  <Text style={s.proLockBadgeText}>Pro</Text>
+                </View>
+              )}
+              {isActive && !isLocked && (
+                <Feather name="check-circle" size={16} color={colors.primary} />
+              )}
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {/* Appearance — App Icons */}
+      <View style={s.section}>
+        <Text style={s.sectionTitle}>App Icon</Text>
+        <View style={s.iconGrid}>
+          {APP_ICONS.map((icon) => {
+            const isActive = currentIconId === icon.id;
+            const isLocked = !isSubscribed && icon.id !== "default";
+            return (
+              <Pressable
+                key={icon.id}
+                style={({ pressed }) => [
+                  s.iconTile,
+                  isActive && s.iconTileActive,
+                  pressed && { opacity: 0.8 },
+                ]}
+                onPress={() => !settingIcon && handleSelectIcon(icon.id)}
+                accessibilityLabel={`Select ${icon.name} app icon`}
+              >
+                <View style={[s.iconPreview, { backgroundColor: icon.bgColor }]}>
+                  <View style={[s.iconRing1, { borderColor: icon.accentColor + "80" }]}>
+                    <View style={[s.iconRingDot, { backgroundColor: icon.accentColor }]} />
+                  </View>
+                </View>
+                <Text style={s.iconTileName}>{icon.name}</Text>
+                {isLocked ? (
+                  <View style={s.proLockBadge}>
+                    <Text style={s.proLockBadgeText}>Pro</Text>
+                  </View>
+                ) : isActive ? (
+                  <Feather name="check" size={12} color={colors.primary} />
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={s.iconHint}>
+          Icon switching requires a native build via the app stores
+        </Text>
+      </View>
 
       {/* Account actions */}
       <View style={s.section}>
@@ -694,6 +812,109 @@ function makeStyles(
     },
     referralStatusBadgeTextCredited: {
       color: "#16a34a",
+    },
+    themeRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: colors.card,
+      borderRadius: colors.radius,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      marginBottom: 8,
+      gap: 12,
+    },
+    themeRowActive: {
+      borderColor: colors.primary,
+      borderWidth: 2,
+    },
+    themeSwatchGroup: {
+      width: 44,
+      height: 44,
+      borderRadius: 10,
+      overflow: "hidden",
+    },
+    themeSwatchBig: {
+      width: 44,
+      height: 44,
+      borderRadius: 10,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    themeSwatchDot: {
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+    },
+    themeRowName: {
+      flex: 1,
+      fontSize: 15,
+      color: colors.foreground,
+      fontFamily: "Inter_500Medium",
+    },
+    proLockBadge: {
+      backgroundColor: colors.primary,
+      borderRadius: 20,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+    },
+    proLockBadgeText: {
+      fontSize: 11,
+      fontWeight: "600" as const,
+      color: colors.primaryForeground,
+      fontFamily: "Inter_600SemiBold",
+    },
+    iconGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 10,
+    },
+    iconTile: {
+      alignItems: "center",
+      gap: 6,
+      backgroundColor: colors.card,
+      borderRadius: colors.radius,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      minWidth: 70,
+    },
+    iconTileActive: {
+      borderColor: colors.primary,
+      borderWidth: 2,
+    },
+    iconPreview: {
+      width: 52,
+      height: 52,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    iconRing1: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      borderWidth: 3,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    iconRingDot: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+    },
+    iconTileName: {
+      fontSize: 11,
+      color: colors.foreground,
+      fontFamily: "Inter_500Medium",
+    },
+    iconHint: {
+      fontSize: 12,
+      color: colors.mutedForeground,
+      fontFamily: "Inter_400Regular",
+      marginTop: 6,
     },
     menuItem: {
       flexDirection: "row",
