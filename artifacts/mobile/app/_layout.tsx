@@ -127,14 +127,6 @@ function RootLayoutNav() {
         name="ref/[code]"
         options={{ headerShown: false }}
       />
-      <Stack.Screen
-        name="legal/privacy"
-        options={{ title: "Privacy Policy", headerBackTitle: "Back" }}
-      />
-      <Stack.Screen
-        name="legal/terms"
-        options={{ title: "Terms of Service", headerBackTitle: "Back" }}
-      />
     </Stack>
   );
 }
