@@ -140,6 +140,9 @@ export default function HomeScreen() {
         </View>
       )}
 
+      {/* Goal input label */}
+      <Text style={s.inputLabel}>What is your goal?</Text>
+
       {/* Goal input */}
       <View style={s.searchRow}>
         <View style={s.searchContainer}>
@@ -383,6 +386,13 @@ function makeStyles(
       color: colors.mutedForeground,
       fontFamily: "Inter_500Medium",
       textAlign: "right",
+    },
+    inputLabel: {
+      fontSize: 15,
+      fontWeight: "600" as const,
+      color: colors.foreground,
+      fontFamily: "Inter_600SemiBold",
+      marginBottom: 2,
     },
     searchRow: {
       flexDirection: "row",

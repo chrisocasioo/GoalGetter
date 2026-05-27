@@ -158,6 +158,25 @@ export default function PlanDetailScreen() {
     if (plan?.title) navigation.setOptions({ title: plan.title });
   }, [plan?.title, navigation]);
 
+  // Auto-expand sub-steps that were previously expanded (isExpanded: true in DB)
+  const autoExpandedRef = useRef(false);
+  useEffect(() => {
+    if (!plan || autoExpandedRef.current) return;
+    autoExpandedRef.current = true;
+    const toExpand = plan.steps.flatMap((step) =>
+      step.children.filter((child) => child.isExpanded).map((child) => child.id),
+    );
+    toExpand.forEach((stepId) => {
+      if (expandedMap.has(stepId)) return;
+      expandStep
+        .mutateAsync({ id: stepId })
+        .then((result) => {
+          setExpandedMap((prev) => new Map(prev).set(stepId, result.children));
+        })
+        .catch(() => {});
+    });
+  }, [plan?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ─── Auth gate ────────────────────────────────────────────────────────
 
   const withAuth = (action: () => void) => {
@@ -322,7 +341,7 @@ export default function PlanDetailScreen() {
                 onSubmitEditing={handleSaveEdit}
               />
             ) : (
-              <Pressable onLongPress={() => handleStartEdit(step.id, step.text)}>
+              <Pressable onPress={() => handleStartEdit(step.id, step.text)}>
                 <Text style={[s.stepText, hasChildren && s.stepTextExpanded]}>
                   {step.text}
                 </Text>
