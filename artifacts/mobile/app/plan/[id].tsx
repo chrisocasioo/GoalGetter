@@ -411,8 +411,8 @@ export default function PlanDetailScreen() {
           {/* Floating ghost item while dragging */}
           {isDragging && floatingStep && (
             <Animated.View
-              pointerEvents="none"
               style={[
+                { pointerEvents: "none" as const },
                 s.floatingGhost,
                 {
                   top: itemLayouts.current[dragSourceIdx!]?.y ?? 0,
