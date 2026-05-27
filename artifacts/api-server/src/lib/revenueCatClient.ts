@@ -8,10 +8,14 @@ export function getRevenueCatClient() {
 
   const connectors = new ReplitConnectors();
 
+  // The RC SDK passes a Request object (or string/URL) as the first argument.
+  // We cast to `any` here because `RequestInfo` is a DOM global not present in
+  // the Node es2022 lib; at runtime we always receive a Request object.
   _client = createClient({
     baseUrl: "https://api.revenuecat.com/v2",
-    fetch: async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-      const req = input instanceof Request ? input : new Request(input as string, init);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fetch: async (input: any, _init?: any): Promise<Response> => {
+      const req: Request = input instanceof Request ? input : new Request(String(input), _init);
 
       const parsedUrl = new URL(req.url);
       const path = parsedUrl.pathname + parsedUrl.search;
@@ -26,7 +30,7 @@ export function getRevenueCatClient() {
       }
 
       const headersObj: Record<string, string> = {};
-      req.headers.forEach((value, key) => {
+      req.headers.forEach((value: string, key: string) => {
         headersObj[key] = value;
       });
 

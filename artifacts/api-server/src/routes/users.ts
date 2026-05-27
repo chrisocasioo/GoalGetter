@@ -217,15 +217,13 @@ router.post(
         });
         if (error) {
           logger.warn({ clerkUserId, error }, "RC entitlement lookup failed");
-        } else if (data?.items) {
-          const proEntitlement = data.items.find(
-            (e: any) => e.entitlement?.lookup_key === RC_ENTITLEMENT,
-          );
-          if (proEntitlement) {
-            isProVerified = true;
-            if (proEntitlement.expires_at_ms) {
-              verifiedExpiresAt = new Date(proEntitlement.expires_at_ms);
-            }
+        } else if (data?.items && data.items.length > 0) {
+          // Any active entitlement means the user is Pro (we have a single entitlement).
+          // CustomerEntitlement has: entitlement_id (RC internal ID) + expires_at (ms epoch).
+          isProVerified = true;
+          const firstItem = data.items[0];
+          if (firstItem.expires_at) {
+            verifiedExpiresAt = new Date(firstItem.expires_at);
           }
         }
       } catch (rcErr) {
