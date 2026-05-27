@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
 import { db } from "@workspace/db";
 import { users, referrals } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { grantCustomerEntitlement, listEntitlements } from "@replit/revenuecat-sdk";
 import { logger } from "../lib/logger";
 import { getRevenueCatClient } from "../lib/revenueCatClient";
@@ -68,7 +68,8 @@ async function creditReferrerIfApplicable(refereeDbId: number, refereeClerkId: s
       return;
     }
 
-    // Compute 1-month extension from existing expiry (or from now if not pro)
+    // Pre-compute an estimated expiry for the RC API call (best-effort).
+    // DB update uses an atomic SQL expression instead so concurrent credits stack correctly.
     const baseMs =
       referrer.subscriptionExpiresAt && referrer.subscriptionExpiresAt > new Date()
         ? referrer.subscriptionExpiresAt.getTime()
@@ -76,7 +77,10 @@ async function creditReferrerIfApplicable(refereeDbId: number, refereeClerkId: s
     const newExpiry = new Date(baseMs + THIRTY_DAYS_MS);
 
     // Step 1: Atomically claim the referral and update referrer's DB record.
-    // The WHERE status='pending' guard ensures only one concurrent request succeeds.
+    // - WHERE status='pending' guard: only one concurrent INITIAL_PURCHASE fires
+    // - SQL GREATEST expression: if two different referrals credit the same referrer
+    //   concurrently, Postgres row-level locking serialises the updates so each adds
+    //   exactly 30 days on top of whatever was committed by the prior one
     let claimed = false;
     await db.transaction(async (tx) => {
       const claimRows = await tx
@@ -92,7 +96,7 @@ async function creditReferrerIfApplicable(refereeDbId: number, refereeClerkId: s
         .update(users)
         .set({
           subscriptionStatus: "pro",
-          subscriptionExpiresAt: newExpiry,
+          subscriptionExpiresAt: sql`GREATEST(COALESCE(subscription_expires_at, NOW()), NOW()) + interval '30 days'`,
           updatedAt: new Date(),
         })
         .where(eq(users.id, referrer.id));
@@ -158,6 +162,8 @@ interface RevenueCatEvent {
   aliases?: string[];
   expiration_at_ms?: number | null;
   product_id?: string;
+  period_type?: "TRIAL" | "INTRO" | "NORMAL" | "PROMOTIONAL";
+  is_trial_conversion?: boolean;
 }
 
 interface RevenueCatWebhookPayload {
@@ -237,7 +243,13 @@ router.post(
             .where(eq(users.id, user.id));
           logger.info({ clerkUserId, eventType: event.type }, "User upgraded to Pro");
 
-          if (event.type === "INITIAL_PURCHASE") {
+          // Credit referrer only on confirmed first paid conversion:
+          // - INITIAL_PURCHASE with non-trial period (period_type = NORMAL/INTRO/PROMOTIONAL or unset)
+          // - RENEWAL that is a trial-to-paid conversion (is_trial_conversion = true)
+          const isFirstPaidConversion =
+            (event.type === "INITIAL_PURCHASE" && event.period_type !== "TRIAL") ||
+            (event.type === "RENEWAL" && event.is_trial_conversion === true);
+          if (isFirstPaidConversion) {
             await creditReferrerIfApplicable(user.id, clerkUserId);
           }
           break;
