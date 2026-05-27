@@ -16,7 +16,8 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { THEME_ORDER, THEMES, type ThemeId, useTheme } from "@/context/ThemeContext";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { ICON_STORAGE_KEY, THEME_ORDER, THEMES, type ThemeId, useTheme } from "@/context/ThemeContext";
 import { useColors } from "@/hooks/useColors";
 import { APP_ICONS, type AppIconId, getAppIcon, setAppIcon } from "@/lib/appIcon";
 import { useSubscription } from "@/lib/revenuecat";
@@ -51,7 +52,16 @@ export default function ProfileScreen() {
   const isSubscribed = serverIsSubscribed || rcSubscribed;
 
   useEffect(() => {
-    getAppIcon().then(setCurrentIconId).catch(() => {});
+    // Load stored icon preference first; fall back to OS-level icon query
+    AsyncStorage.getItem(ICON_STORAGE_KEY)
+      .then((stored) => {
+        if (stored && APP_ICONS.some((i) => i.id === stored)) {
+          setCurrentIconId(stored as AppIconId);
+        } else {
+          return getAppIcon().then(setCurrentIconId);
+        }
+      })
+      .catch(() => getAppIcon().then(setCurrentIconId).catch(() => {}));
   }, []);
 
   const handleSelectTheme = (id: ThemeId) => {
@@ -71,11 +81,17 @@ export default function ProfileScreen() {
     setSettingIcon(true);
     try {
       const ok = await setAppIcon(iconId);
-      setCurrentIconId(iconId);
-      if (!ok) {
+      if (ok) {
+        // Native icon actually changed — update state and persist
+        setCurrentIconId(iconId);
+        await AsyncStorage.setItem(ICON_STORAGE_KEY, iconId).catch(() => {});
+      } else {
+        // Native API unavailable (dev/simulator) — save preference for native build
+        // but keep the currently-shown icon unchanged in the UI
+        await AsyncStorage.setItem(ICON_STORAGE_KEY, iconId).catch(() => {});
         Alert.alert(
-          "Icon Updated",
-          "Your icon preference has been saved. The home screen icon will update after the next app install.",
+          "Preference Saved",
+          "Your icon choice is saved and will take effect after installing from the app store.",
         );
       }
     } catch {

@@ -17,10 +17,12 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import Purchases from "react-native-purchases";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthSync } from "@/context/AuthContext";
-import { ThemeProvider } from "@/context/ThemeContext";
-import { initializeRevenueCat, SubscriptionProvider } from "@/lib/revenuecat";
+import { ICON_STORAGE_KEY, ThemeProvider, useTheme } from "@/context/ThemeContext";
+import { initializeRevenueCat, SubscriptionProvider, useSubscription } from "@/lib/revenuecat";
+import { setAppIcon } from "@/lib/appIcon";
 import { setBaseUrl } from "@workspace/api-client-react";
 
 setBaseUrl(`https://${process.env.EXPO_PUBLIC_DOMAIN}`);
@@ -49,6 +51,35 @@ const tokenCache: TokenCache = {
 SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
+
+/**
+ * Enforces Pro-only entitlements at the app level.
+ * Resets theme to "default" and icon to "default" whenever the user is not an
+ * active subscriber — including after subscription expiry, refund, or restart.
+ * Must be rendered inside both <ThemeProvider> and <SubscriptionProvider>.
+ */
+function AppEntitlementEnforcer() {
+  const { isSubscribed } = useSubscription();
+  const { themeId, setThemeId } = useTheme();
+
+  useEffect(() => {
+    if (isSubscribed) return;
+    if (themeId !== "default") {
+      setThemeId("default");
+    }
+    // Reset icon preference and OS icon to default
+    AsyncStorage.getItem(ICON_STORAGE_KEY)
+      .then((stored) => {
+        if (stored && stored !== "default") {
+          AsyncStorage.setItem(ICON_STORAGE_KEY, "default").catch(() => {});
+          setAppIcon("default").catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }, [isSubscribed, themeId, setThemeId]);
+
+  return null;
+}
 
 function RevenueCatAuth() {
   const { isSignedIn } = useAuth();
@@ -121,6 +152,7 @@ export default function RootLayout() {
           <ThemeProvider>
             <QueryClientProvider client={queryClient}>
               <SubscriptionProvider>
+                <AppEntitlementEnforcer />
                 <GestureHandlerRootView>
                   <KeyboardProvider>
                     <AuthSync />

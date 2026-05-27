@@ -3,7 +3,8 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 
 import { RADIUS, THEME_ORDER, THEMES, type ColorPalette, type ThemeId } from "@/constants/themes";
 
-const THEME_STORAGE_KEY = "@goalgetter/theme";
+export const THEME_STORAGE_KEY = "@goalgetter/theme";
+export const ICON_STORAGE_KEY = "@goalgetter/icon";
 
 interface ThemeContextValue {
   themeId: ThemeId;
