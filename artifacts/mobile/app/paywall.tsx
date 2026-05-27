@@ -1,4 +1,3 @@
-import { useAuth } from "@clerk/expo";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
@@ -31,7 +30,6 @@ export default function PaywallScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { getToken } = useAuth();
   const queryClient = useQueryClient();
   const { offerings, purchase, restore, isPurchasing, isRestoring, isSubscribed } =
     useSubscription();
@@ -63,31 +61,11 @@ export default function PaywallScreen() {
   const doPurchase = async (pkg: any) => {
     setConfirmPkg(null);
     try {
-      const customerInfo = await purchase(pkg);
-      // Sync subscription status to the backend immediately — don't wait for webhook
-      try {
-        const token = await getToken();
-        if (token) {
-          const entitlement = (customerInfo as any)?.entitlements?.active?.pro;
-          await fetch(
-            `https://${process.env.EXPO_PUBLIC_DOMAIN}/api/subscription/sync`,
-            {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${token}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                expirationDate: entitlement?.expirationDate ?? null,
-              }),
-            },
-          );
-          // Refresh server-side profile so subscription status is up to date
-          queryClient.invalidateQueries({ queryKey: getGetMyProfileQueryKey() });
-        }
-      } catch {
-        // Non-fatal — webhook will update DB eventually
-      }
+      await purchase(pkg);
+      // Invalidate server profile so UI re-reads DB state after webhook updates it.
+      // Durable Pro status is granted exclusively by the RevenueCat webhook
+      // (POST /api/webhooks/revenuecat) — never from client-provided data.
+      queryClient.invalidateQueries({ queryKey: getGetMyProfileQueryKey() });
       router.back();
     } catch (err: any) {
       if (err?.userCancelled) return;

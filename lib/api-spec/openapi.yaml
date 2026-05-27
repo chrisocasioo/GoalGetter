@@ -262,51 +262,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
-  /subscription/sync:
-    post:
-      operationId: syncSubscription
-      tags: [users]
-      summary: Sync subscription status after a successful purchase
-      description: >
-        Called by the mobile client immediately after a RevenueCat purchase to
-        optimistically update the DB without waiting for the webhook.
-        Only upgrades (→ pro); downgrades are handled exclusively via webhook.
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                expirationDate:
-                  type: string
-                  format: date-time
-                  nullable: true
-      responses:
-        "200":
-          description: Subscription synced
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  subscriptionStatus:
-                    type: string
-                required:
-                  - subscriptionStatus
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "404":
-          description: User not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-
   /users/me:
     get:
       operationId: getMyProfile

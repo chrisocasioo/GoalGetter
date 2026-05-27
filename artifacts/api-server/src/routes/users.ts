@@ -172,49 +172,4 @@ async function handleDeleteAccount(req: Request, res: Response, next: NextFuncti
 router.delete("/account", requireAuth, handleDeleteAccount);
 router.delete("/users/me", requireAuth, handleDeleteAccount);
 
-/**
- * POST /subscription/sync
- * Called by the mobile client immediately after a successful RevenueCat purchase
- * to update the DB without waiting for the webhook. Auth-required (Clerk JWT).
- * Only upgrades (→ pro); downgrades are handled exclusively via webhook.
- */
-router.post(
-  "/subscription/sync",
-  requireAuth,
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const clerkUserId = req.clerkUserId!;
-      const user = await db.query.users.findFirst({
-        where: eq(users.clerkUserId, clerkUserId),
-      });
-
-      if (!user) {
-        res.status(404).json({ error: "User not found. Call /users/sync first." });
-        return;
-      }
-
-      // Optimistically mark as pro. The RevenueCat webhook will later confirm
-      // (INITIAL_PURCHASE) or override (EXPIRATION) this status.
-      const expiresAt = req.body?.expirationDate
-        ? new Date(req.body.expirationDate)
-        : null;
-
-      await db
-        .update(users)
-        .set({
-          subscriptionStatus: "pro",
-          ...(expiresAt ? { subscriptionExpiresAt: expiresAt } : {}),
-          updatedAt: new Date(),
-        })
-        .where(eq(users.id, user.id));
-
-      logger.info({ clerkUserId }, "Subscription synced to Pro via client post-purchase");
-
-      res.json({ subscriptionStatus: "pro" });
-    } catch (err) {
-      next(err);
-    }
-  },
-);
-
 export default router;
