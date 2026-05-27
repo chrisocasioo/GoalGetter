@@ -5,22 +5,30 @@ import {
   Inter_700Bold,
   useFonts,
 } from "@expo-google-fonts/inter";
-import { ClerkProvider, type TokenCache } from "@clerk/expo";
+import { ClerkProvider, useAuth, useUser, type TokenCache } from "@clerk/expo";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
+import { Alert } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
+import Purchases from "react-native-purchases";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthSync } from "@/context/AuthContext";
+import { initializeRevenueCat, SubscriptionProvider } from "@/lib/revenuecat";
 import { setBaseUrl } from "@workspace/api-client-react";
 
-// Configure API base URL — must be done outside any component
 setBaseUrl(`https://${process.env.EXPO_PUBLIC_DOMAIN}`);
+
+try {
+  initializeRevenueCat();
+} catch (err: any) {
+  Alert.alert("RevenueCat Unavailable", err?.message ?? "Unknown error");
+}
 
 const clerkPubKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
 const clerkProxyUrl = process.env.EXPO_PUBLIC_CLERK_PROXY_URL ?? "";
@@ -41,6 +49,21 @@ SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
+function RevenueCatAuth() {
+  const { isSignedIn } = useAuth();
+  const { user } = useUser();
+
+  useEffect(() => {
+    if (isSignedIn && user?.id) {
+      Purchases.logIn(user.id).catch(() => {});
+    } else if (!isSignedIn) {
+      Purchases.logOut().catch(() => {});
+    }
+  }, [isSignedIn, user?.id]);
+
+  return null;
+}
+
 function RootLayoutNav() {
   return (
     <Stack screenOptions={{ headerBackTitle: "Back" }}>
@@ -49,6 +72,10 @@ function RootLayoutNav() {
       <Stack.Screen
         name="plan/[id]"
         options={{ title: "Plan", headerBackTitle: "Back" }}
+      />
+      <Stack.Screen
+        name="paywall"
+        options={{ title: "GoalGetter Pro", headerShown: false }}
       />
       <Stack.Screen
         name="legal/privacy"
@@ -87,12 +114,15 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <ErrorBoundary>
           <QueryClientProvider client={queryClient}>
-            <GestureHandlerRootView>
-              <KeyboardProvider>
-                <AuthSync />
-                <RootLayoutNav />
-              </KeyboardProvider>
-            </GestureHandlerRootView>
+            <SubscriptionProvider>
+              <GestureHandlerRootView>
+                <KeyboardProvider>
+                  <AuthSync />
+                  <RevenueCatAuth />
+                  <RootLayoutNav />
+                </KeyboardProvider>
+              </GestureHandlerRootView>
+            </SubscriptionProvider>
           </QueryClientProvider>
         </ErrorBoundary>
       </SafeAreaProvider>

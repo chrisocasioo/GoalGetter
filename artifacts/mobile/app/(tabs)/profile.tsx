@@ -4,6 +4,8 @@ import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
   Alert,
+  Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
+import { useSubscription } from "@/lib/revenuecat";
 import {
   useDeleteMyAccount,
   useGetMyProfile,
@@ -29,6 +32,7 @@ export default function ProfileScreen() {
   });
   const deleteAccount = useDeleteMyAccount();
   const [copiedCode, setCopiedCode] = useState(false);
+  const { isSubscribed, expirationDate } = useSubscription();
 
   const handleSignOut = async () => {
     await signOut();
@@ -63,6 +67,21 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleManageSubscription = () => {
+    const url =
+      Platform.OS === "android"
+        ? "https://play.google.com/store/account/subscriptions"
+        : "https://apps.apple.com/account/subscriptions";
+    Linking.openURL(url).catch(() => {
+      Alert.alert("Couldn't Open", "Please manage your subscription through your device settings.");
+    });
+  };
+
+  const formatExpiry = (date: Date | null) => {
+    if (!date) return null;
+    return date.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  };
+
   const s = makeStyles(colors, insets);
 
   if (!isSignedIn) {
@@ -89,7 +108,6 @@ export default function ProfileScreen() {
             <Text style={s.signUpButtonText}>Create Account</Text>
           </Pressable>
 
-          {/* Legal links visible to guests too */}
           <View style={s.legalRow}>
             <Pressable onPress={() => router.push("/legal/privacy")}>
               <Text style={s.legalLink}>Privacy Policy</Text>
@@ -118,21 +136,62 @@ export default function ProfileScreen() {
           </Text>
         </View>
         <Text style={s.email}>{profile?.email ?? "Loading…"}</Text>
-        <View
-          style={[
-            s.badge,
-            profile?.subscriptionStatus === "pro" && s.badgePro,
-          ]}
-        >
-          <Text
-            style={[
-              s.badgeText,
-              profile?.subscriptionStatus === "pro" && s.badgeTextPro,
-            ]}
-          >
-            {profile?.subscriptionStatus === "pro" ? "Pro" : "Free"}
+        <View style={[s.badge, isSubscribed && s.badgePro]}>
+          <Text style={[s.badgeText, isSubscribed && s.badgeTextPro]}>
+            {isSubscribed ? "Pro" : "Free"}
           </Text>
         </View>
+      </View>
+
+      {/* Subscription section */}
+      <View style={s.section}>
+        <Text style={s.sectionTitle}>Subscription</Text>
+        {isSubscribed ? (
+          <>
+            <View style={s.subCard}>
+              <View style={s.subCardLeft}>
+                <View style={s.subIconWrap}>
+                  <Feather name="award" size={18} color={colors.primaryForeground} />
+                </View>
+                <View>
+                  <Text style={s.subCardTitle}>GoalGetter Pro</Text>
+                  {expirationDate && (
+                    <Text style={s.subCardRenew}>
+                      Renews {formatExpiry(expirationDate)}
+                    </Text>
+                  )}
+                </View>
+              </View>
+              <View style={s.subActiveBadge}>
+                <Text style={s.subActiveBadgeText}>Active</Text>
+              </View>
+            </View>
+            <Pressable
+              style={({ pressed }) => [s.menuItem, pressed && { opacity: 0.7 }]}
+              onPress={handleManageSubscription}
+            >
+              <Feather name="settings" size={18} color={colors.foreground} />
+              <Text style={s.menuItemText}>Manage Subscription</Text>
+              <Feather name="external-link" size={16} color={colors.mutedForeground} />
+            </Pressable>
+          </>
+        ) : (
+          <Pressable
+            style={({ pressed }) => [s.upgradeCard, pressed && { opacity: 0.85 }]}
+            onPress={() => router.push("/paywall")}
+          >
+            <View style={s.upgradeLeft}>
+              <View style={s.upgradeIcon}>
+                <Feather name="award" size={20} color={colors.primaryForeground} />
+              </View>
+              <View style={s.upgradeText}>
+                <Text style={s.upgradeTitle}>Upgrade to Pro</Text>
+                <Text style={s.upgradeSubtitle}>Unlimited plans · Pro themes · Icons</Text>
+              </View>
+            </View>
+            <Feather name="chevron-right" size={18} color={colors.primary} />
+          </Pressable>
+        )}
       </View>
 
       {/* Referral */}
@@ -344,6 +403,94 @@ function makeStyles(
       textTransform: "uppercase",
       letterSpacing: 0.8,
       marginBottom: 8,
+    },
+    subCard: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      backgroundColor: colors.secondary,
+      borderRadius: colors.radius,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      marginBottom: 8,
+    },
+    subCardLeft: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      flex: 1,
+    },
+    subIconWrap: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: colors.primary,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    subCardTitle: {
+      fontSize: 15,
+      fontWeight: "600" as const,
+      color: colors.foreground,
+      fontFamily: "Inter_600SemiBold",
+    },
+    subCardRenew: {
+      fontSize: 12,
+      color: colors.mutedForeground,
+      fontFamily: "Inter_400Regular",
+      marginTop: 2,
+    },
+    subActiveBadge: {
+      backgroundColor: "#16a34a",
+      borderRadius: 20,
+      paddingHorizontal: 10,
+      paddingVertical: 3,
+    },
+    subActiveBadgeText: {
+      fontSize: 11,
+      fontWeight: "600" as const,
+      color: "#ffffff",
+      fontFamily: "Inter_600SemiBold",
+    },
+    upgradeCard: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      backgroundColor: colors.secondary,
+      borderRadius: colors.radius,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+    },
+    upgradeLeft: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      flex: 1,
+    },
+    upgradeIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.primary,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    upgradeText: { flex: 1 },
+    upgradeTitle: {
+      fontSize: 15,
+      fontWeight: "600" as const,
+      color: colors.primary,
+      fontFamily: "Inter_600SemiBold",
+    },
+    upgradeSubtitle: {
+      fontSize: 12,
+      color: colors.mutedForeground,
+      fontFamily: "Inter_400Regular",
+      marginTop: 2,
     },
     referralCard: {
       flexDirection: "row",
