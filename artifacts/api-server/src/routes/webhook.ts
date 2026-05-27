@@ -2,60 +2,129 @@ import { Router, type IRouter, type Request, type Response, type NextFunction } 
 import { db } from "@workspace/db";
 import { users, referrals } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
+import { grantCustomerEntitlement, listEntitlements } from "@replit/revenuecat-sdk";
 import { logger } from "../lib/logger";
+import { getRevenueCatClient } from "../lib/revenueCatClient";
 
 const router: IRouter = Router();
 
 const WEBHOOK_SECRET = process.env.REVENUECAT_WEBHOOK_SECRET;
+const RC_PROJECT_ID = process.env.REVENUECAT_PROJECT_ID ?? "";
+const RC_ENTITLEMENT = "pro";
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
+let cachedProEntitlementId: string | null = null;
+
+async function getProEntitlementId(): Promise<string | null> {
+  if (cachedProEntitlementId) return cachedProEntitlementId;
+  if (!RC_PROJECT_ID) return null;
+
+  try {
+    const client = getRevenueCatClient();
+    const { data, error } = await listEntitlements({
+      client,
+      path: { project_id: RC_PROJECT_ID },
+    });
+    if (error || !data?.items) {
+      logger.warn({ error }, "Could not list RC entitlements to find pro ID");
+      return null;
+    }
+    const proEnt = data.items.find((e) => e.lookup_key === RC_ENTITLEMENT);
+    if (!proEnt) {
+      logger.warn({ RC_ENTITLEMENT }, "Pro entitlement not found in RC project");
+      return null;
+    }
+    cachedProEntitlementId = proEnt.id;
+    logger.info({ entitlementId: cachedProEntitlementId }, "Cached pro entitlement ID from RC");
+    return cachedProEntitlementId;
+  } catch (err) {
+    logger.warn({ err }, "Error fetching RC entitlement list");
+    return null;
+  }
+}
+
 /**
  * When a referee completes their first purchase, credit the referrer with 1 free month of Pro.
- * Idempotent: only credits once (pending → credited transition).
+ *
+ * Design:
+ * 1. Atomically transition referral from pending → credited (+ update user in one DB transaction)
+ *    — this is the idempotency guard; concurrent INITIAL_PURCHASE retries update 0 rows on retry.
+ * 2. After the transaction, grant via RC's promotional entitlement API so RC is the authority.
+ * 3. Log but never surface RC errors — DB state is already correct as fallback.
  */
 async function creditReferrerIfApplicable(refereeDbId: number, refereeClerkId: string): Promise<void> {
   try {
     const pendingReferral = await db.query.referrals.findFirst({
       where: and(eq(referrals.refereeId, refereeDbId), eq(referrals.status, "pending")),
     });
-
-    if (!pendingReferral) {
-      return;
-    }
+    if (!pendingReferral) return;
 
     const referrer = await db.query.users.findFirst({
       where: eq(users.id, pendingReferral.referrerId),
     });
-
     if (!referrer) {
-      logger.warn(
-        { referralId: pendingReferral.id, referrerId: pendingReferral.referrerId },
-        "Referral referrer not found",
-      );
+      logger.warn({ referralId: pendingReferral.id }, "Referral referrer not found — skipping credit");
       return;
     }
 
-    // Extend or grant 1 month of Pro — stack on top of existing expiry if already Pro
+    // Compute 1-month extension from existing expiry (or from now if not pro)
     const baseMs =
       referrer.subscriptionExpiresAt && referrer.subscriptionExpiresAt > new Date()
         ? referrer.subscriptionExpiresAt.getTime()
         : Date.now();
     const newExpiry = new Date(baseMs + THIRTY_DAYS_MS);
 
-    await db
-      .update(users)
-      .set({
-        subscriptionStatus: "pro",
-        subscriptionExpiresAt: newExpiry,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, referrer.id));
+    // Step 1: Atomically claim the referral and update referrer's DB record.
+    // The WHERE status='pending' guard ensures only one concurrent request succeeds.
+    let claimed = false;
+    await db.transaction(async (tx) => {
+      const claimRows = await tx
+        .update(referrals)
+        .set({ status: "credited", creditedAt: new Date() })
+        .where(and(eq(referrals.id, pendingReferral.id), eq(referrals.status, "pending")))
+        .returning({ id: referrals.id });
 
-    await db
-      .update(referrals)
-      .set({ status: "credited", creditedAt: new Date() })
-      .where(eq(referrals.id, pendingReferral.id));
+      if (claimRows.length === 0) return; // already credited — commit empty tx
+
+      claimed = true;
+      await tx
+        .update(users)
+        .set({
+          subscriptionStatus: "pro",
+          subscriptionExpiresAt: newExpiry,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, referrer.id));
+    });
+
+    if (!claimed) {
+      logger.info({ referralId: pendingReferral.id }, "Referral already credited by concurrent request — skipping");
+      return;
+    }
+
+    // Step 2: Grant via RC promotional entitlement API so RC is the source of truth.
+    // DB above is the fallback if this fails.
+    try {
+      const proEntitlementId = await getProEntitlementId();
+      if (proEntitlementId) {
+        const client = getRevenueCatClient();
+        const { error: grantError } = await grantCustomerEntitlement({
+          client,
+          path: { project_id: RC_PROJECT_ID, customer_id: referrer.clerkUserId },
+          body: { entitlement_id: proEntitlementId, expires_at: newExpiry.getTime() },
+        });
+        if (grantError) {
+          logger.warn({ grantError, referrerId: referrer.id }, "RC grant failed — DB fallback active");
+        } else {
+          logger.info({ referrerId: referrer.id, newExpiry }, "RC entitlement granted for referral credit");
+        }
+      } else {
+        logger.warn({ referrerId: referrer.id }, "Pro entitlement ID unavailable — skipped RC grant; DB fallback active");
+      }
+    } catch (rcErr) {
+      logger.warn({ rcErr, referrerId: referrer.id }, "RC grant threw — DB fallback active");
+    }
 
     logger.info(
       {
@@ -65,11 +134,10 @@ async function creditReferrerIfApplicable(refereeDbId: number, refereeClerkId: s
         refereeClerkId,
         newExpiry,
       },
-      "Referral credited — referrer granted 1 month Pro",
+      "Referral credited — referrer granted 1 free month of Pro",
     );
   } catch (err) {
-    // Never let referral crediting fail the webhook response
-    logger.error({ err, refereeDbId }, "Failed to credit referrer");
+    logger.error({ err, refereeDbId }, "creditReferrerIfApplicable failed — webhook still acks");
   }
 }
 
@@ -147,15 +215,12 @@ router.post(
       }
 
       if (!user) {
-        // User not found — not yet synced or fully anonymous; ack and move on
         logger.warn({ clerkUserId }, "RevenueCat webhook: user not found (including aliases)");
         res.status(200).json({ received: true });
         return;
       }
 
-      const expiresAt = event.expiration_at_ms
-        ? new Date(event.expiration_at_ms)
-        : null;
+      const expiresAt = event.expiration_at_ms ? new Date(event.expiration_at_ms) : null;
 
       switch (event.type) {
         case "INITIAL_PURCHASE":
@@ -172,20 +237,15 @@ router.post(
             .where(eq(users.id, user.id));
           logger.info({ clerkUserId, eventType: event.type }, "User upgraded to Pro");
 
-          // On a first-ever purchase, check if this user was referred and credit the referrer
           if (event.type === "INITIAL_PURCHASE") {
             await creditReferrerIfApplicable(user.id, clerkUserId);
           }
           break;
 
         case "CANCELLATION":
-          // Keep pro until expiry — just record the expiry date
           await db
             .update(users)
-            .set({
-              subscriptionExpiresAt: expiresAt,
-              updatedAt: new Date(),
-            })
+            .set({ subscriptionExpiresAt: expiresAt, updatedAt: new Date() })
             .where(eq(users.id, user.id));
           logger.info({ clerkUserId }, "Subscription cancelled — keeping Pro until expiry");
           break;
@@ -194,11 +254,7 @@ router.post(
         case "BILLING_ISSUE":
           await db
             .update(users)
-            .set({
-              subscriptionStatus: "free",
-              subscriptionExpiresAt: null,
-              updatedAt: new Date(),
-            })
+            .set({ subscriptionStatus: "free", subscriptionExpiresAt: null, updatedAt: new Date() })
             .where(eq(users.id, user.id));
           logger.info({ clerkUserId, eventType: event.type }, "User downgraded to Free");
           break;

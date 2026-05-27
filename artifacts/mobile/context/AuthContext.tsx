@@ -29,16 +29,28 @@ export function AuthSync() {
           const stored = await SecureStore.getItemAsync(REFERRAL_CODE_KEY);
           if (stored) {
             referralCode = stored;
-            await SecureStore.deleteItemAsync(REFERRAL_CODE_KEY);
           }
         } catch {
         }
 
-        syncUser({
-          clerkUserId: user.id,
-          email: user.primaryEmailAddress!.emailAddress,
-          ...(referralCode ? { referralCode } : {}),
-        }).catch(() => {});
+        try {
+          await syncUser({
+            clerkUserId: user.id,
+            email: user.primaryEmailAddress!.emailAddress,
+            ...(referralCode ? { referralCode } : {}),
+          });
+          // Only clear the stored code after a successful sync so the referral
+          // is not lost if the network request fails on first sign-in
+          if (referralCode) {
+            try {
+              await SecureStore.deleteItemAsync(REFERRAL_CODE_KEY);
+            } catch {
+            }
+          }
+        } catch {
+          // syncUser failed — keep the referral code in SecureStore
+          // so it will be tried again on next sign-in
+        }
       })();
     }
   }, [isSignedIn, user?.id]);
