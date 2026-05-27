@@ -36,8 +36,15 @@ router.post(
   "/webhooks/revenuecat",
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      // Verify Authorization header when secret is configured
-      if (WEBHOOK_SECRET) {
+      // Auth check — fail-closed: require secret in production, warn in development
+      if (!WEBHOOK_SECRET) {
+        if (process.env.NODE_ENV !== "development") {
+          logger.error("REVENUECAT_WEBHOOK_SECRET is not set — rejecting webhook (fail-closed)");
+          res.status(503).json({ error: "Webhook not configured" });
+          return;
+        }
+        logger.warn("REVENUECAT_WEBHOOK_SECRET not set — skipping auth check (development only)");
+      } else {
         const authHeader = req.headers.authorization ?? "";
         const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
         if (token !== WEBHOOK_SECRET) {

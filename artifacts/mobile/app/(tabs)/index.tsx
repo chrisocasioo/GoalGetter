@@ -64,7 +64,13 @@ export default function HomeScreen() {
       onError: (err: unknown) => {
         const status = (err as { status?: number })?.status;
         if (status === 429) {
-          setShowLimitModal(true);
+          if (isSignedIn) {
+            // Signed-in free user hit the plan limit → show paywall
+            router.push("/paywall");
+          } else {
+            // Guest user hit the limit → show sign-up prompt
+            setShowLimitModal(true);
+          }
         }
       },
     },

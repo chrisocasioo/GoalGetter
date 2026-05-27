@@ -32,7 +32,14 @@ export default function ProfileScreen() {
   });
   const deleteAccount = useDeleteMyAccount();
   const [copiedCode, setCopiedCode] = useState(false);
-  const { isSubscribed, expirationDate } = useSubscription();
+  const { isSubscribed: rcSubscribed, expirationDate: rcExpirationDate } = useSubscription();
+  // Use server-verified subscription state (from DB/webhook) as primary source,
+  // fall back to RC client state for immediate feedback right after purchase
+  const serverIsSubscribed = profile?.subscriptionStatus === "pro";
+  const isSubscribed = serverIsSubscribed || rcSubscribed;
+  const expirationDate =
+    (profile?.subscriptionExpiresAt ? new Date(profile.subscriptionExpiresAt) : null) ??
+    rcExpirationDate;
 
   const handleSignOut = async () => {
     await signOut();

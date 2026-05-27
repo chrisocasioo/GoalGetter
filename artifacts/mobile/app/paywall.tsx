@@ -1,4 +1,6 @@
+import { useAuth } from "@clerk/expo";
 import { Feather } from "@expo/vector-icons";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -15,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
 import { useSubscription } from "@/lib/revenuecat";
+import { getGetMyProfileQueryKey } from "@workspace/api-client-react";
 
 const PRO_FEATURES = [
   { icon: "zap" as const, text: "Unlimited goal plans" },
@@ -28,6 +31,8 @@ export default function PaywallScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { getToken } = useAuth();
+  const queryClient = useQueryClient();
   const { offerings, purchase, restore, isPurchasing, isRestoring, isSubscribed } =
     useSubscription();
 
@@ -58,7 +63,31 @@ export default function PaywallScreen() {
   const doPurchase = async (pkg: any) => {
     setConfirmPkg(null);
     try {
-      await purchase(pkg);
+      const customerInfo = await purchase(pkg);
+      // Sync subscription status to the backend immediately — don't wait for webhook
+      try {
+        const token = await getToken();
+        if (token) {
+          const entitlement = (customerInfo as any)?.entitlements?.active?.pro;
+          await fetch(
+            `https://${process.env.EXPO_PUBLIC_DOMAIN}/api/subscription/sync`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                expirationDate: entitlement?.expirationDate ?? null,
+              }),
+            },
+          );
+          // Refresh server-side profile so subscription status is up to date
+          queryClient.invalidateQueries({ queryKey: getGetMyProfileQueryKey() });
+        }
+      } catch {
+        // Non-fatal — webhook will update DB eventually
+      }
       router.back();
     } catch (err: any) {
       if (err?.userCancelled) return;
