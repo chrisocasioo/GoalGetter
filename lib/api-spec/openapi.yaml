@@ -262,6 +262,40 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /subscription/sync:
+    post:
+      operationId: syncSubscription
+      tags: [users]
+      summary: Sync subscription status after a successful purchase
+      description: >
+        Called by the mobile client immediately after a RevenueCat purchase.
+        Verifies entitlement server-to-server with RevenueCat before granting Pro.
+        Bridges the gap between purchase and webhook delivery for immediate activation.
+      responses:
+        "200":
+          description: Subscription status (verified by RevenueCat)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subscriptionStatus:
+                    type: string
+                required:
+                  - subscriptionStatus
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /users/me:
     get:
       operationId: getMyProfile

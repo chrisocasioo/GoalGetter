@@ -1,3 +1,4 @@
+import { useAuth } from "@clerk/expo";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
@@ -30,6 +31,7 @@ export default function PaywallScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { getToken } = useAuth();
   const queryClient = useQueryClient();
   const { offerings, purchase, restore, isPurchasing, isRestoring, isSubscribed } =
     useSubscription();
@@ -62,9 +64,23 @@ export default function PaywallScreen() {
     setConfirmPkg(null);
     try {
       await purchase(pkg);
-      // Invalidate server profile so UI re-reads DB state after webhook updates it.
-      // Durable Pro status is granted exclusively by the RevenueCat webhook
-      // (POST /api/webhooks/revenuecat) — never from client-provided data.
+      // Call backend sync endpoint — it verifies entitlement server-to-server with
+      // RevenueCat and updates the DB immediately so plan-generation gating reflects
+      // Pro status without waiting for webhook delivery.
+      try {
+        const token = await getToken();
+        if (token) {
+          await fetch(
+            `https://${process.env.EXPO_PUBLIC_DOMAIN}/api/subscription/sync`,
+            {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}` },
+            },
+          );
+        }
+      } catch {
+        // Non-fatal — webhook will update DB if sync fails
+      }
       queryClient.invalidateQueries({ queryKey: getGetMyProfileQueryKey() });
       router.back();
     } catch (err: any) {

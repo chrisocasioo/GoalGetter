@@ -64,13 +64,26 @@ router.post(
 
       logger.info({ eventType: event.type, clerkUserId }, "RevenueCat webhook received");
 
-      const user = await db.query.users.findFirst({
+      // Resolve user by app_user_id first, then fall back to known aliases
+      let user = await db.query.users.findFirst({
         where: eq(users.clerkUserId, clerkUserId),
       });
 
+      if (!user && event.aliases && event.aliases.length > 0) {
+        for (const alias of event.aliases) {
+          user = await db.query.users.findFirst({
+            where: eq(users.clerkUserId, alias),
+          });
+          if (user) {
+            logger.info({ clerkUserId, alias, userId: user.id }, "Resolved user via alias");
+            break;
+          }
+        }
+      }
+
       if (!user) {
-        // User not found — could be an alias or not yet synced; ack and move on
-        logger.warn({ clerkUserId }, "RevenueCat webhook: user not found");
+        // User not found — not yet synced or fully anonymous; ack and move on
+        logger.warn({ clerkUserId }, "RevenueCat webhook: user not found (including aliases)");
         res.status(200).json({ received: true });
         return;
       }

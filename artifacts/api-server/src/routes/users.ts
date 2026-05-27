@@ -4,8 +4,13 @@ import { users, referrals } from "@workspace/db";
 import { SyncUserBody } from "@workspace/api-zod";
 import { eq } from "drizzle-orm";
 import crypto from "node:crypto";
+import { listCustomerActiveEntitlements } from "@replit/revenuecat-sdk";
 import { requireAuth } from "../middlewares/auth";
 import { logger } from "../lib/logger";
+import { getRevenueCatClient } from "../lib/revenueCatClient";
+
+const RC_PROJECT_ID = process.env.REVENUECAT_PROJECT_ID ?? "";
+const RC_ENTITLEMENT = "pro";
 
 const router: IRouter = Router();
 
@@ -171,5 +176,83 @@ async function handleDeleteAccount(req: Request, res: Response, next: NextFuncti
 
 router.delete("/account", requireAuth, handleDeleteAccount);
 router.delete("/users/me", requireAuth, handleDeleteAccount);
+
+/**
+ * POST /subscription/sync
+ * Called by the mobile client immediately after a successful RevenueCat purchase.
+ * Verifies the subscription server-to-server with RevenueCat before updating the DB.
+ * This bridges the gap between purchase completion and webhook delivery so Pro
+ * activates immediately without trusting client-provided claims.
+ */
+router.post(
+  "/subscription/sync",
+  requireAuth,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const clerkUserId = req.clerkUserId!;
+
+      const user = await db.query.users.findFirst({
+        where: eq(users.clerkUserId, clerkUserId),
+      });
+
+      if (!user) {
+        res.status(404).json({ error: "User not found. Call /users/sync first." });
+        return;
+      }
+
+      if (!RC_PROJECT_ID) {
+        logger.error("REVENUECAT_PROJECT_ID not set — cannot verify subscription");
+        res.status(503).json({ error: "Subscription verification unavailable" });
+        return;
+      }
+
+      // Verify entitlement server-to-server with RevenueCat
+      let isProVerified = false;
+      let verifiedExpiresAt: Date | null = null;
+      try {
+        const client = getRevenueCatClient();
+        const { data, error } = await listCustomerActiveEntitlements({
+          client,
+          path: { project_id: RC_PROJECT_ID, customer_id: clerkUserId },
+        });
+        if (error) {
+          logger.warn({ clerkUserId, error }, "RC entitlement lookup failed");
+        } else if (data?.items) {
+          const proEntitlement = data.items.find(
+            (e: any) => e.entitlement?.lookup_key === RC_ENTITLEMENT,
+          );
+          if (proEntitlement) {
+            isProVerified = true;
+            if (proEntitlement.expires_at_ms) {
+              verifiedExpiresAt = new Date(proEntitlement.expires_at_ms);
+            }
+          }
+        }
+      } catch (rcErr) {
+        logger.warn({ clerkUserId, rcErr }, "RC entitlement verification threw — falling through");
+      }
+
+      if (!isProVerified) {
+        logger.info({ clerkUserId }, "Subscription sync: no active Pro entitlement found in RC");
+        res.json({ subscriptionStatus: user.subscriptionStatus });
+        return;
+      }
+
+      await db
+        .update(users)
+        .set({
+          subscriptionStatus: "pro",
+          ...(verifiedExpiresAt ? { subscriptionExpiresAt: verifiedExpiresAt } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, user.id));
+
+      logger.info({ clerkUserId }, "Subscription synced to Pro — verified via RevenueCat API");
+      res.json({ subscriptionStatus: "pro" });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 export default router;
