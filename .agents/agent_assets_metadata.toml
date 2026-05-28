@@ -10,22 +10,22 @@ title = "goalgetter app icon"
 id = "oVFGjO45mnUjcxGSiExED"
 uri = "file://artifacts/mobile/store/screenshots/01-home.png"
 type = "image"
-title = "Screenshot 1 — Home Screen"
+title = "Screenshot 1 — Home Screen (1284×2778)"
 
 [[outputs]]
 id = "VerKtfoPxSQ0XSy8kbZH-"
 uri = "file://artifacts/mobile/store/screenshots/02-plan.png"
 type = "image"
-title = "Screenshot 2 — Plan Detail"
+title = "Screenshot 2 — Plan Detail (1284×2778)"
 
 [[outputs]]
 id = "iBlaUchAgpHr1NawjGxcs"
 uri = "file://artifacts/mobile/store/screenshots/03-substeps.png"
 type = "image"
-title = "Screenshot 3 — Sub-steps"
+title = "Screenshot 3 — Sub-steps (1284×2778)"
 
 [[outputs]]
 id = "Sd6fx0hjr6pDxwfz9SPel"
 uri = "file://artifacts/mobile/store/screenshots/04-pro.png"
 type = "image"
-title = "Screenshot 4 — Pro Paywall"
+title = "Screenshot 4 — Pro Paywall (1284×2778)"
