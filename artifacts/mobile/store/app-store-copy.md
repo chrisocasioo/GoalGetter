@@ -100,6 +100,18 @@ The app contains no mature content, user-generated content requiring moderation,
 
 ---
 
+## Marketing URL
+*(Optional — links to your app's marketing website, shown on the App Store product page)*
+
+**https://goal-decomposer.replit.app**
+
+---
+
+## Routing App Coverage File
+*(Only required for apps that provide turn-by-turn navigation/routing directions — GoalGetter does **not** use routing, so leave this field blank in App Store Connect)*
+
+---
+
 ## Copyright
 **© 2026 GoalGetter**
 
