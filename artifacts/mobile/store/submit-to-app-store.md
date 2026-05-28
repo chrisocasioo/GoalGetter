@@ -1,5 +1,47 @@
 # Submitting GoalGetter to App Store Connect
 
+This runbook covers both the **automated CI path** (recommended for all releases) and the manual fallback path using EAS Build (Expo Application Services).
+
+---
+
+## Automated releases via GitHub Actions (recommended)
+
+Pushing a version tag to the repository automatically triggers the iOS release pipeline defined in `.github/workflows/ios-release.yml`. No Mac, no manual steps.
+
+### One-time CI setup
+
+Before the first automated run, store a single secret in your GitHub repository:
+
+1. Go to **GitHub → Repository → Settings → Secrets and variables → Actions**
+2. Add a new repository secret:
+
+| Secret name | Value |
+|---|---|
+| `EXPO_TOKEN` | A long-lived Expo access token — create one at [expo.dev/accounts/[account]/settings/access-tokens](https://expo.dev/accounts/) |
+
+Apple credentials (`EXPO_APPLE_ID`, `EXPO_ASC_APP_ID`, `EXPO_APPLE_TEAM_ID`) are read from **EAS secrets** (set once per project via `eas secret:create` — see Step 4 below). They do not need to be duplicated as GitHub secrets.
+
+### Triggering a release
+
+```bash
+# Bump the version in app.json, commit, then tag
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+The workflow will:
+1. Install dependencies
+2. Run `eas build --platform ios --profile production --auto-submit --non-interactive`
+3. Upload the finished `.ipa` to TestFlight automatically
+
+Monitor progress at **GitHub → Actions → iOS Release** or in the [Expo dashboard](https://expo.dev).
+
+---
+
+## Manual fallback
+
+Use the steps below only if CI is unavailable or you need to submit a specific one-off build.
+
 This runbook covers every command needed to build and upload the production iOS binary using EAS Build (Expo Application Services). Run these steps from the `artifacts/mobile` directory.
 
 ---
