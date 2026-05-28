@@ -110,6 +110,20 @@ The app contains no mature content, user-generated content requiring moderation,
 
 ---
 
+## Screenshots
+*(Upload from `store/screenshots/` — 6.9" iPhone 16 Pro Max, 1320×2868 px)*
+
+| File | Headline | What it shows |
+|------|----------|---------------|
+| `01-home.png` | Turn any goal into a step-by-step plan | Home screen with goal input and saved plans list |
+| `02-plan.png` | Your complete action plan, in seconds | Plan detail with 8 AI-generated steps |
+| `03-substeps.png` | Drill into any step — as deep as you need | Step expanded into 7 sub-steps with depth line |
+| `04-pro.png` | Unlock the full GoalGetter experience | Pro paywall with pricing cards and feature list |
+
+Upload in this order in App Store Connect — order determines display on the store page.
+
+---
+
 ## App Store Connect Checklist
 
 Before submitting for review, confirm the following are done in App Store Connect:
