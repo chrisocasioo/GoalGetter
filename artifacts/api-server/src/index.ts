@@ -1,6 +1,19 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 
+const REQUIRED_REVENUECAT_VARS = [
+  "REVENUECAT_WEBHOOK_SECRET",
+  "REVENUECAT_PROJECT_ID",
+  "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY",
+  "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY",
+] as const;
+
+for (const key of REQUIRED_REVENUECAT_VARS) {
+  if (!process.env[key]) {
+    logger.warn({ key }, `RevenueCat env var not set — subscription features may not work correctly`);
+  }
+}
+
 const rawPort = process.env["PORT"];
 
 if (!rawPort) {
