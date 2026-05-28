@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "GoalGetter Mobile",
-    "slug": "mobile",
+    "name": "GoalGetter",
+    "slug": "goalgetter",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
