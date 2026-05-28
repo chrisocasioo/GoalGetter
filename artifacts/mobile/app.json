@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "GoalGetter",
+    "name": "GoaGetter",
     "slug": "goalgetter",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -15,13 +15,13 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.goalgetter.app",
+      "bundleIdentifier": "app.replit.goalgettermobile",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "package": "com.goalgetter.app"
+      "package": "app.replit.goalgettermobile"
     },
     "web": {
       "favicon": "./assets/images/icon.png"

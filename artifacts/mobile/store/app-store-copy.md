@@ -5,7 +5,7 @@ Paste each field directly into App Store Connect. Character counts are noted for
 ---
 
 ## App Name
-**GoalGetter**
+**GoaGetter**
 *(10 characters — well within the 30-character limit)*
 
 ---
