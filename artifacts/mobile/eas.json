@@ -20,8 +20,7 @@
     "production": {
       "autoIncrement": true,
       "ios": {
-        "distribution": "store",
-        "bundleIdentifier": "com.goalgetter.app"
+        "distribution": "store"
       }
     }
   },
