@@ -14,9 +14,12 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.goalgetter.app"
     },
-    "android": {},
+    "android": {
+      "package": "com.goalgetter.app"
+    },
     "web": {
       "favicon": "./assets/images/icon.png"
     },
